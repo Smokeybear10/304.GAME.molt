@@ -1055,15 +1055,16 @@ export class BodyHopScene extends Phaser.Scene {
     for (const actor of actors)
       if (
         actor.hp > 0 &&
+        actor.faction === "enemy" &&
         (actor.action?.stage === "windup" || actor.action?.kind === "leap" ||
-          (actor.faction === "enemy" && actor.action?.kind === "charge"))
+          actor.action?.kind === "charge")
       )
         this.drawTelegraph(actor);
     if (
-      input?.hasExplicitAim &&
-      !player.action &&
-      player.specialCooldownMs <= 0 &&
-      run.phase === "playing"
+      input &&
+      player.hp > 0 &&
+      player.action?.kind !== "dash" &&
+      (run.phase === "playing" || run.phase === "cleared")
     )
       this.drawAim(run, player, input.aimDirection, input.aimDistance);
     const aliveActors = new Set<number>();
@@ -1733,12 +1734,27 @@ export class BodyHopScene extends Phaser.Scene {
       g.strokePath();
       g.lineStyle(2, LIGHT, 0.5).strokeCircle(target.x, target.y, actor.radius);
     } else {
-      const startX = actor.x + aim.x * (actor.radius + 10),
-        startY = actor.y + aim.y * (actor.radius + 10),
-        endX = actor.x + aim.x * 230,
-        endY = actor.y + aim.y * 230;
-      g.lineStyle(2, LIGHT, 0.45).lineBetween(startX, startY, endX, endY);
-      g.lineStyle(1.5, LIGHT, 0.65).strokeCircle(endX, endY, 5);
+      const length = Math.max(80, Math.min(260, aimDistance ?? 230));
+      const baseAngle = Math.atan2(aim.y, aim.x);
+      const angles = run.mutations.includes("split-glands")
+        ? [baseAngle - 0.2, baseAngle, baseAngle + 0.2]
+        : [baseAngle];
+      for (const angle of angles) {
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const isCenter = angle === baseAngle;
+        const startX = actor.x + dx * (actor.radius + 10);
+        const startY = actor.y + dy * (actor.radius + 10);
+        const endX = actor.x + dx * (isCenter ? length : length * 0.78);
+        const endY = actor.y + dy * (isCenter ? length : length * 0.78);
+        g.lineStyle(isCenter ? 2 : 1.3, LIGHT, isCenter ? 0.45 : 0.22).lineBetween(
+          startX,
+          startY,
+          endX,
+          endY
+        );
+        if (isCenter) g.lineStyle(1.5, LIGHT, 0.65).strokeCircle(endX, endY, 5);
+      }
     }
   }
   private drawMorphology(

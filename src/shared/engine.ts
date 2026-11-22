@@ -383,7 +383,7 @@ export function canSwitchBody(_run: Run, _corpseId: number): boolean {
 }
 
 function canTakeDamage(target: Actor): boolean {
-  return target.hp > 0 && target.faction !== 'echo' && (target.faction !== 'player' || target.invulnerableMs <= 0);
+  return target.hp > 0 && target.faction !== 'echo' && (target.faction !== 'player' || (target.invulnerableMs <= 0 && target.action?.kind !== 'dash'));
 }
 
 function damage(run: Run, target: Actor, amount: number, sourceId: number, generation: 0 | 1, poison: boolean, cause: string, events: GameEvent[]): boolean {

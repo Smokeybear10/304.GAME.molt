@@ -9,16 +9,16 @@ export const TICK_MS = 1000 / 60;
 export const BODY_SWITCH_RANGE = 0;
 export const BODY_SWITCH_COOLDOWN_MS = 350;
 export const DASH_COOLDOWN_MS = 1000;
-export const DASH_DURATION_MS = 160;
-export const DASH_SPEED = 620;
-export const DASH_INVULNERABLE_MS = 260;
+export const DASH_DURATION_MS = 115;
+export const DASH_SPEED = 480;
+export const DASH_INVULNERABLE_MS = 160;
 export const BOSS_HP = 8;
 export const EXIT_RADIUS = 66;
 export const LEAP_RADIUS = { enemy: 80, player: 100 } as const;
 export const LEAP_DISTANCE = 210;
 export const PLAYER_BULLET_RADIUS = 14;
-export const PLAYER_SPIT_SPEED = 600;
-export const PLAYER_SPIT_WINDUP_MS = 55;
+export const PLAYER_SPIT_SPEED = 560;
+export const PLAYER_SPIT_WINDUP_MS = 90;
 export const PLAYER_MELEE_WINDUP_MS = 80;
 export const PLAYER_LEAP_BASE_MS = 140;
 export const PLAYER_LEAP_RANGE_MS = 240;
@@ -29,7 +29,7 @@ export const POSSESSION_CLEAR_RADIUS = 72;
 export const CHARGE_SPEED = 650;
 export const CHARGE_DURATION_MS = 420;
 export const SPECIES: Record<Species, { name: string; action: string; radius: number; speed: number; enemyHp: number; shell: number; basicMs: number; specialMs: number; enemySpecialMs: number }> = {
-  spitter: { name: 'Spitter', action: 'Spit', radius: 30, speed: 215, enemyHp: 1, shell: 0, basicMs: 750, specialMs: 400, enemySpecialMs: 2800 },
+  spitter: { name: 'Spitter', action: 'Spit', radius: 30, speed: 215, enemyHp: 1, shell: 0, basicMs: 750, specialMs: 620, enemySpecialMs: 2800 },
   beetle: { name: 'Beetle', action: 'Ram', radius: 37, speed: 150, enemyHp: 1, shell: 0, basicMs: 780, specialMs: 1000, enemySpecialMs: 3900 },
   hopper: { name: 'Hopper', action: 'Pounce', radius: 30, speed: 205, enemyHp: 1, shell: 0, basicMs: 430, specialMs: 1200, enemySpecialMs: 4300 },
 };

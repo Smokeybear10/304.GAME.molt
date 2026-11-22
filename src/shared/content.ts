@@ -1,4 +1,4 @@
-import type { Challenge, Encounter, MutationId, Species } from './types.ts';
+import type { Challenge, Encounter, MutationId, RunResult, Species } from './types.ts';
 
 export const CONTENT_VERSION = 'body-hop-v8';
 const SEED_NAMESPACE = 'body-hop-v2';
@@ -118,4 +118,16 @@ export function getRewardOffers(challenge: Challenge, encounterIndex: number, ow
   const ranked = MUTATION_IDS.filter(id => !owned.includes(id)).map(id => ({ id, rank: hashSeed(`${challenge.seed}:reward:${encounterIndex}:${id}`) }))
     .sort((left, right) => left.rank - right.rank || left.id.localeCompare(right.id)).map(entry => entry.id);
   return ranked.slice(0, 3);
+}
+export function computeRunScore(result: Pick<RunResult, 'outcome' | 'completedEncounters' | 'activeTimeMs' | 'counters'>): number {
+  const chambers = result.completedEncounters * 1000;
+  const escapeBonus = result.outcome === 'escaped' ? 2000 : 0;
+  const kills = result.counters.kills * 30;
+  const noHitBonus = result.outcome === 'escaped' && result.counters.damageTaken === 0
+    ? 1500
+    : Math.max(0, Math.round((3 - result.counters.damageTaken) * 250));
+  const speedBonus = result.outcome === 'escaped'
+    ? Math.max(0, Math.round(1800 - result.activeTimeMs / 100))
+    : 0;
+  return chambers + escapeBonus + kills + noHitBonus + speedBonus;
 }

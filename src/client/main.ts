@@ -554,6 +554,11 @@ function renderReady() {
         ? "Start escape"
         : "Enter chamber"
     }</button>
+    ${
+      restored || !first
+        ? '<button id="restart-run-button" class="text-button" type="button">Restart from Chamber 1</button>'
+        : ""
+    }
     <p class="fine-print">${
       first
         ? touchControls
@@ -568,6 +573,12 @@ function renderReady() {
     if (ctx) paintTitle(ctx, titleCanvas.width, titleCanvas.height, true);
   }
   bind("begin-button", begin);
+  if (restored || !first)
+    bind("restart-run-button", () => {
+      newAttempt();
+      saveBoundary();
+      begin();
+    });
 }
 
 function mutationSpecimen(id: MutationId, className = "mutation-specimen") {
@@ -727,6 +738,7 @@ function renderPause() {
         ? '<button id="reload-graphics" class="text-button" type="button">Reload from checkpoint</button>'
         : ""
     }
+    <button id="pause-restart" class="text-button" type="button">Restart from Chamber 1</button>
     <button id="pause-settings" class="text-button" type="button">Controls & settings</button>
     ${
       run.mutations.length
@@ -745,6 +757,11 @@ function renderPause() {
     else begin();
   });
   if (graphicsLost) bind("reload-graphics", () => location.reload());
+  bind("pause-restart", () => {
+    newAttempt();
+    saveBoundary();
+    begin();
+  });
   bind("pause-settings", () => {
     settingsOpen = true;
     updateUi(true);
@@ -766,7 +783,7 @@ function renderSettings() {
     }</p>
     <p class="fine-print">Clear all waves, then leave through the opening above to claim your next upgrade.</p>
     <p class="health-rule"><strong>Red hearts = life.</strong> ${healthExplanation()}<br>Dodge with the small ring at your center.</p>
-    <button id="close-settings" class="primary-button" type="button">${recoveredResult ? "Back to body record" : "Back to the body"}</button>`);
+    <button id="close-settings" class="primary-button" type="button">${recoveredResult ? "Back to run record" : "Back to game"}</button>`);
   element<HTMLInputElement>("setting-sound").addEventListener(
     "change",
     (event) => {

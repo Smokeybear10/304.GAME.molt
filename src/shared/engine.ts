@@ -1,5 +1,5 @@
 import { CheckpointSchema } from './types.ts';
-import type { Actor, BulletPattern, Checkpoint, Challenge, Corpse, GameEvent, HealthModel, InputFrame, MutationId, Rect, Run, RunResult, Species, Vec2 } from './types.ts';
+import type { Actor, BulletPattern, Checkpoint, Challenge, Corpse, GameEvent, HealthModel, InputFrame, MutationId, Rect, Run, RunResult, Species, Spore, Vec2 } from './types.ts';
 import { BODY_SWITCH_COOLDOWN_MS, BOSS_HP, CHARGE_DURATION_MS, CHARGE_SPEED, CONTENT_VERSION, DASH_COOLDOWN_MS, DASH_DURATION_MS, DASH_INVULNERABLE_MS, DASH_SPEED, ENCOUNTER_COUNT, ENEMY_WALK_SPEED_SCALE, EXIT_RADIUS, LEAP_DISTANCE, LEAP_RADIUS, MAX_ENEMY_PROJECTILES, MAX_PROJECTILES, PLAYER_BULLET_RADIUS, PLAYER_LEAP_BASE_MS, PLAYER_LEAP_RANGE_MS, PLAYER_MELEE_WINDUP_MS, PLAYER_SPIT_SPEED, PLAYER_SPIT_WINDUP_MS, POSSESSION_CLEAR_RADIUS, SPECIES, TICK_MS, WORLD_HEIGHT, WORLD_WIDTH, getEncounter, getRewardOffers } from './content.ts';
 
 export const EMPTY_INPUT: InputFrame = { moveX: 0, moveY: 0, aimX: 0, aimY: -1, attackHeld: false, abilityPressed: false, assistedBasic: true, hopHeld: false, hopCommitId: null, hopCancelled: false, dashPressed: false };
@@ -223,6 +223,7 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   run.corpses = [];
   run.projectiles = [];
   run.areas = [];
+  run.spores = [];
   run.silkTrail = null;
   run.encounterTimeMs = 0;
   run.encounterGroup = 0;
@@ -235,6 +236,15 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   player.invulnerableMs = 600;
   player.lastSpecial = host.lastSpecial ? { ...host.lastSpecial } : null;
   run.playerId = player.id;
+  const sporeSlots = run.encounterIndex % 2 === 0
+    ? [{ x: 205, y: 490 }, { x: 515, y: 360 }]
+    : [{ x: 515, y: 490 }, { x: 205, y: 360 }];
+  for (const spot of sporeSlots) {
+    const pos = fitPosition(run, spot.x, spot.y, 26);
+    if (distance(pos, encounter.start) > 150) {
+      run.spores.push({ id: run.nextEntityId++, x: pos.x, y: pos.y, radius: 22, alive: true });
+    }
+  }
   const initialEnemies = encounter.groups[0]!.map((spawn, index) => {
     const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
     enemy.basicCooldownMs = 1500 + index * 280;
@@ -280,7 +290,7 @@ export function createRun(challenge: Challenge, _healthModel: HealthModel = 'sha
   const maxCore = 3;
   const run: Run = {
     challenge: { ...challenge }, runId, healthModel: 'shared', phase: 'ready', resumePhase: 'ready', encounterIndex: 0, completedEncounters: 0,
-    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], silkTrail: null, obstacles: [], mutations: [], rewardOffers: [],
+    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], spores: [], silkTrail: null, obstacles: [], mutations: [], rewardOffers: [],
     activeTimeMs: 0, encounterTimeMs: 0, lineage: [{ species: 'spitter', encounterIndex: 0, atMs: 0 }], encounterRecords: [],
     counters: { kills: 0, hops: 0, specials: 0, damageTaken: 0 }, nextEntityId: 1, hopCooldownMs: 0, lossCause: '', boundaryCheckpoint: null, encounterGroup: 0, exit: { x: WORLD_WIDTH / 2, y: 72 },
   };
@@ -351,13 +361,24 @@ function advanceEncounter(run: Run): void {
 }
 export function chooseMutation(run: Run, offerId: MutationId, replaceSlot: 0 | 1 | null = null): GameEvent[] {
   if (run.phase !== 'reward' || !run.rewardOffers.includes(offerId) || run.mutations.includes(offerId)) return [];
-  if (run.mutations.length < 5) run.mutations.push(offerId);
+  if (run.mutations.length < 6) run.mutations.push(offerId);
   else if (replaceSlot === 0 || replaceSlot === 1) run.mutations[replaceSlot] = offerId;
   else return [];
   const player = getPlayer(run);
   const event: GameEvent = { type: 'mutation', mutationId: offerId, x: player.x, y: player.y };
   advanceEncounter(run);
   return [event];
+}
+export function takeCursedPact(run: Run, offerId: MutationId): GameEvent[] {
+  if (run.phase !== 'reward' || run.encounterIndex !== 2 || run.core <= 1) return [];
+  if (!run.rewardOffers.includes(offerId) || run.mutations.includes(offerId) || run.mutations.length >= 6) return [];
+  run.core -= 1;
+  const player = getPlayer(run);
+  player.hp = run.core;
+  run.mutations.push(offerId);
+  run.rewardOffers = getRewardOffers(run.challenge, run.encounterIndex, run.mutations);
+  run.boundaryCheckpoint = captureBoundary(run);
+  return [{ type: 'mutation', mutationId: offerId, x: player.x, y: player.y }, { type: 'checkpoint' }];
 }
 export function skipReward(run: Run): GameEvent[] {
   if (run.phase === 'reward') advanceEncounter(run);
@@ -618,10 +639,26 @@ function updateAction(run: Run, actor: Actor, dt: number, events: GameEvent[]): 
     events.push({ type: 'impact', sourceId: actor.id, faction: actor.faction, hitCount, x: actor.x, y: actor.y, radius, kind: 'leap' });
     actor.action = null;
   } else if (action.kind === 'dash') {
+    const before = { x: actor.x, y: actor.y };
     const plannedDistance = DASH_SPEED * activeDt / 1000;
     const endpoint = previewCharge(run, actor, action.dirX, action.dirY, plannedDistance);
     actor.x = endpoint.x;
     actor.y = endpoint.y;
+    if (run.phase === 'playing') {
+      const grazed = run.projectiles.filter(
+        shot => shot.faction === 'enemy' && segmentDistance(shot, before, actor) <= actor.radius + shot.radius + 12
+      );
+      if (grazed.length > 0) {
+        const grazedIds = new Set(grazed.map(shot => shot.id));
+        run.projectiles = run.projectiles.filter(shot => !grazedIds.has(shot.id));
+        if (action.hitIds.length === 0) {
+          action.hitIds.push(1);
+          actor.basicCooldownMs = Math.max(0, actor.basicCooldownMs - 500);
+          actor.specialCooldownMs = 0;
+          events.push({ type: 'impact', sourceId: actor.id, faction: actor.faction, hitCount: grazed.length, x: actor.x, y: actor.y, radius: 64, kind: 'graze' });
+        }
+      }
+    }
     if (action.timeMs >= action.durationMs) actor.action = null;
   }
 }
@@ -771,6 +808,20 @@ function updateEnemy(run: Run, actor: Actor, dt: number, events: GameEvent[]): v
   if (actor.basicCooldownMs <= 0 && length < range && hasLineOfSight(run, actor, player)) basicAttack(run, actor, toward.x, toward.y, events);
 }
 
+function detonateSpore(run: Run, spore: Spore, sourceId: number, events: GameEvent[]): void {
+  if (!spore.alive) return;
+  spore.alive = false;
+  run.projectiles = run.projectiles.filter(shot => shot.faction !== 'enemy' || distance(shot, spore) > 165);
+  const victims = run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && distance(actor, spore) <= 155 + actor.radius);
+  let hitCount = 0;
+  for (const target of victims) {
+    const away = direction(target.x - spore.x, target.y - spore.y);
+    displace(run, target, away.x * 75, away.y * 75);
+    if (damage(run, target, 4, sourceId, 0, false, '', events)) hitCount += 1;
+  }
+  events.push({ type: 'impact', sourceId, faction: 'player', hitCount, x: spore.x, y: spore.y, radius: 155, kind: 'spore' });
+}
+
 function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
   const homing = has(run, 'venom-sacs');
   for (const shot of run.projectiles) {
@@ -816,11 +867,23 @@ function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
       continue;
     }
     if (run.phase === 'cleared') continue;
+    if (shot.faction === 'player') {
+      const hitSpore = run.spores.find(spore => spore.alive && segmentDistance(spore, start, shot) < spore.radius + shot.radius);
+      if (hitSpore) {
+        detonateSpore(run, hitSpore, shot.ownerId, events);
+        shot.lifeMs = 0;
+        continue;
+      }
+    }
     const possible = shot.faction === 'enemy' ? [getPlayer(run)] : run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0);
     const hit = possible.filter(actor => !(actor.action?.kind === 'leap' && actor.action.stage === 'active') && segmentDistance(actor, start, shot) < (actor.faction === 'player' && shot.faction === 'enemy' ? PLAYER_BULLET_RADIUS : actor.radius) + shot.radius)
       .sort((a, b) => distance(start, a) - distance(start, b) || a.id - b.id)[0];
     if (!hit) continue;
     damage(run, hit, shot.damage, shot.ownerId, shot.generation, shot.poison, shot.kind === 'barb' ? 'A barb struck your exposed body.' : 'A spit struck your exposed body.', events);
+    if (shot.faction === 'player' && hit.hp > 0) {
+      const push = direction(shot.vx, shot.vy);
+      displace(run, hit, push.x * (hit.elite ? 8 : 22), push.y * (hit.elite ? 8 : 22));
+    }
     shot.lifeMs = 0;
   }
   run.projectiles = run.projectiles.filter(shot => shot.lifeMs > 0);
@@ -898,6 +961,7 @@ function finishEncounter(run: Run, events: GameEvent[]): void {
   run.completedEncounters = run.encounterIndex + 1;
   run.projectiles = [];
   run.areas = [];
+  run.spores = [];
   run.silkTrail = null;
   const player = getPlayer(run);
   if (run.core < run.maxCore) {

@@ -991,6 +991,16 @@ export class BodyHopScene extends Phaser.Scene {
           .lineBetween(area.x, area.y, area.toX, area.toY);
       }
     }
+    for (const spore of run.spores) {
+      if (!spore.alive) continue;
+      const pulse = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.008 + spore.id) * 2.5;
+      ground.fillStyle(BLACK, 0.22).fillEllipse(spore.x + 2, spore.y + spore.radius * 0.55, spore.radius * 2.1, spore.radius * 1.1);
+      ground.lineStyle(1.5, 0xe87b35, 0.35).strokeCircle(spore.x, spore.y, spore.radius + 7 + pulse);
+      marks.fillStyle(0x6e231c, 1).fillCircle(spore.x, spore.y, spore.radius + 1);
+      marks.fillStyle(0xd95b2b, 1).fillCircle(spore.x, spore.y, spore.radius - 2);
+      marks.fillStyle(0xffc86b, 0.92).fillCircle(spore.x - 4, spore.y - 4, spore.radius * 0.42 + pulse * 0.3);
+      marks.lineStyle(2, BLACK, 0.9).strokeCircle(spore.x, spore.y, spore.radius);
+    }
     const input = this.hooks.getInput(),
       player = actors.find((actor) => actor.id === run.playerId)!;
     const aliveCorpses = new Set<number>();
@@ -1279,6 +1289,22 @@ export class BodyHopScene extends Phaser.Scene {
         x: visual.x + anchor.x * squashX * unit,
         y: visual.y - lift + anchor.y * squashY * unit,
       });
+      if (actor.faction === "player" && actor.hp > 0) {
+        ground.lineStyle(2.5, 0x8ef0b0, 0.72).strokeEllipse(visual.x, visual.y + actor.radius * 0.45, actor.radius * 2.25, actor.radius * 1.2);
+        const muts = run.mutations;
+        if (muts.includes("venom-sacs")) {
+          marks.lineStyle(1.8, 0xc38cff, 0.55).strokeCircle(visual.x, visual.y, actor.radius + 5);
+        }
+        if (muts.includes("shock-molt")) {
+          marks.lineStyle(1.8, 0xb8e6ff, 0.6).strokeCircle(visual.x, visual.y, actor.radius + 2);
+        }
+        if (muts.includes("split-glands")) {
+          const perpX = -actor.facingY, perpY = actor.facingX;
+          marks.fillStyle(0xffd275, 0.9);
+          marks.fillCircle(visual.x + perpX * (actor.radius + 3), visual.y + perpY * (actor.radius + 3), 3.5);
+          marks.fillCircle(visual.x - perpX * (actor.radius + 3), visual.y - perpY * (actor.radius + 3), 3.5);
+        }
+      }
       if (actor.faction === "player" && actor.action?.kind === "dash") {
         const dash = actor.action;
         for (let step = 1; step <= 3; step++) {
@@ -1292,15 +1318,15 @@ export class BodyHopScene extends Phaser.Scene {
           .lineStyle(3, 0xc5e5c8, 0.9)
           .strokeCircle(visual.x, visual.y, actor.radius + 7);
       }
-      if (actor.faction === "enemy" && actor.maxHp > 1) {
-        if (actor.hp <= Math.ceil(actor.maxHp / 2)) {
+      if (actor.faction === "enemy" && actor.maxHp > 1 && (actor.elite || actor.hp < actor.maxHp)) {
+        if (actor.elite && actor.hp <= Math.ceil(actor.maxHp / 2)) {
           const pulse = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.014) * 3;
           marks.lineStyle(2.5, RED, 0.65).strokeCircle(visual.x, visual.y, actor.radius + 9 + pulse);
         }
-        const barW = 74;
-        const barH = 7;
+        const barW = actor.elite ? 74 : 38;
+        const barH = actor.elite ? 7 : 5;
         const barX = visual.x - barW / 2;
-        const barY = visual.y - actor.radius - 22;
+        const barY = visual.y - actor.radius - (actor.elite ? 22 : 14);
         marks.fillStyle(BLACK, 0.78).fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
         marks.fillStyle(0x453534, 1).fillRect(barX, barY, barW, barH);
         marks.fillStyle(RED, 1).fillRect(barX, barY, barW * Math.max(0, actor.hp / actor.maxHp), barH);

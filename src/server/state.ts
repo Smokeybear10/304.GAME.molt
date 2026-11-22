@@ -20,10 +20,26 @@ export type PlayerState = {
 export type StoredState = PlayerState & {
   lastMutation: { id: string; fingerprint: string } | null;
 };
+export type LeaderboardEntry = {
+  userId: string;
+  username: string;
+  score: number;
+  chambers: number;
+  escaped: boolean;
+  activeTimeMs: number;
+};
+export type LeaderboardSnapshot = {
+  entries: LeaderboardEntry[];
+  totalPlayers: number;
+  playerRank: number | null;
+  playerBestScore: number | null;
+};
 export type UpdateResult = { ok: boolean; state: StoredState };
 export type StateStore = {
   read(key: string): Promise<StoredState>;
   update(key: string, change: (state: StoredState) => UpdateResult): Promise<UpdateResult>;
+  recordScore?(challengeId: string, entry: LeaderboardEntry): Promise<void>;
+  readLeaderboard?(challengeId: string, userId: string | null): Promise<LeaderboardSnapshot>;
 };
 export type RequestContext = {
   mode: "reddit" | "local";

@@ -17,6 +17,7 @@ import {
   ENCOUNTER_COUNT,
   MUTATIONS,
   SPECIES,
+  computeRunScore,
   getEncounter,
   getDailyRoom,
 } from "../shared/content";
@@ -836,6 +837,7 @@ function renderResult(result: RunResult) {
   const dailyRecord = result.encounterRecords.find(
     (room) => room.encounterIndex === daily.encounterIndex
   );
+  const score = computeRunScore(result);
   document.body.dataset.result = "true";
   showScreen(`<span class="eyebrow">${
     escaped
@@ -848,13 +850,13 @@ function renderResult(result: RunResult) {
     <p id="result-cause" class="result-cause"></p>
     <figure class="last-body">
       <canvas id="result-portrait" width="560" height="200" aria-hidden="true"></canvas>
-      <figcaption><span>${
-        escaped ? "VICTORY BUILD" : "RUN BUILD"
-      }</span><strong>${result.counters.kills} ${
-    result.counters.kills === 1 ? "enemy" : "enemies"
-  } defeated</strong><small>${clock(result.activeTimeMs)} active · ${
-    result.mutations.length
-  } ${result.mutations.length === 1 ? "upgrade" : "upgrades"}</small></figcaption>
+      <figcaption><span>SCORE</span><strong>${score.toLocaleString()}</strong><small>${
+    result.counters.kills
+  } ${result.counters.kills === 1 ? "kill" : "kills"} · ${clock(
+    result.activeTimeMs
+  )} · ${result.mutations.length} ${
+    result.mutations.length === 1 ? "upgrade" : "upgrades"
+  }</small></figcaption>
     </figure>
     <p class="result-summary">${result.completedEncounters}/${ENCOUNTER_COUNT} chambers cleared${
     store.bestProgress > result.completedEncounters
@@ -862,6 +864,7 @@ function renderResult(result: RunResult) {
       : ""
   }</p>
     <p class="result-build">${mutations || "No upgrades"}</p>
+    <section id="daily-leaderboard" class="daily-leaderboard" hidden></section>
     <div class="result-actions">
       <button id="retry-button" class="primary-button" type="button">${store.status === "conflict" ? "Reload saved run" : "Retry this escape"}</button>
       <button id="copy-result" class="text-button" type="button">Copy run record</button>
@@ -871,6 +874,7 @@ function renderResult(result: RunResult) {
   element("result-cause").textContent = escaped
     ? "Six chambers cleared. The Keeper is down."
     : result.cause || "You ran out of life.";
+  void loadLeaderboard(result.challengeId);
   const canvas = element<HTMLCanvasElement>("result-portrait");
   const ctx = canvas.getContext("2d");
   if (ctx) {
@@ -909,22 +913,56 @@ function renderResult(result: RunResult) {
     begin();
   });
   const postUrl = getPostUrl();
-  const record = `MOLT · ${run.challenge.date}\n${
+  const record = `MOLT · ${run.challenge.date} · Score ${score.toLocaleString()}\n${
     escaped
       ? "Escaped all 6 chambers"
       : `Fell in chamber ${result.completedEncounters + 1}`
   } · ${clock(result.activeTimeMs)} · ${result.counters.kills} kills\nBuild: ${
     mutations || "none"
-  }${
-    dailyRecord
-      ? `\nToday’s chamber (${daily.name}): ${dailyRecord.outcome}`
-      : `\nToday’s chamber (${daily.name}): not reached`
   }\n${postUrl ?? result.contentVersion}`;
   bind("copy-result", () => void copyResult(record));
   bind("close-copy", () => {
     element("manual-copy").hidden = true;
     element("copy-result").focus();
   });
+}
+
+async function loadLeaderboard(challengeId: string) {
+  const dateParam = import.meta.env.DEV
+    ? new URL(location.href).searchParams.get("date")
+    : null;
+  const url = dateParam
+    ? `/api/leaderboard?date=${encodeURIComponent(dateParam)}`
+    : "/api/leaderboard";
+  try {
+    await new Promise((r) => setTimeout(r, 250));
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return;
+    const data = (await response.json()) as {
+      entries: { userId: string; username: string; score: number; chambers: number; escaped: boolean }[];
+      totalPlayers: number;
+      playerRank: number | null;
+      playerBestScore: number | null;
+    };
+    const container = document.getElementById("daily-leaderboard");
+    if (!container || run.challenge.id !== challengeId || !data.entries.length) return;
+    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+    const currentId = store.bootstrap.user?.id ?? null;
+    const rows = data.entries
+      .map(
+        (entry, i) =>
+          `<li class="${entry.userId === currentId ? "lb-self" : ""}"><span>#${i + 1} ${esc(entry.username)}</span><span>${entry.score.toLocaleString()}</span></li>`
+      )
+      .join("");
+    const rankLine =
+      data.playerRank !== null
+        ? `<p class="lb-rank">Your rank: #${data.playerRank} of ${data.totalPlayers}${data.playerBestScore !== null ? ` · Best ${data.playerBestScore.toLocaleString()}` : ""}</p>`
+        : "";
+    container.innerHTML = `<h2>TODAY’S LEADERBOARD</h2><ol>${rows}</ol>${rankLine}`;
+    container.hidden = false;
+  } catch {
+    // ignore offline leaderboard errors
+  }
 }
 
 async function copyResult(record: string) {

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { computeRunScore } from "../shared/content.ts";
 import { restoreCheckpoint } from "../shared/engine.ts";
 import {
   applyMutation, emptyState, FinishSchema, playerKey, publicState, SaveSchema,
@@ -54,6 +55,13 @@ export async function routeApi(
     writeJson(response, 200, { ...context, state: publicState(state) });
     return;
   }
+  if (path === "/api/leaderboard" && request.method === "GET") {
+    const board = store.readLeaderboard
+      ? await store.readLeaderboard(context.challenge.id, context.user?.id ?? null)
+      : { entries: [], totalPlayers: 0, playerRank: null, playerBestScore: null };
+    writeJson(response, 200, board);
+    return;
+  }
   if (request.method !== "POST" || (path !== "/api/save" && path !== "/api/result"))
     throw new HttpError(404, "Not found.");
   if (!context.user)
@@ -72,6 +80,17 @@ export async function routeApi(
   if ("checkpoint" in input && !restoreCheckpoint(input.checkpoint, context.challenge))
     throw new HttpError(400, "This checkpoint does not match the challenge.");
   const result = await store.update(playerKey(context), (state) => applyMutation(state, input));
+  if (result.ok && "result" in input && store.recordScore) {
+    const r = input.result;
+    await store.recordScore(context.challenge.id, {
+      userId: context.user.id,
+      username: context.user.username ?? "Player",
+      score: computeRunScore(r),
+      chambers: r.completedEncounters,
+      escaped: r.outcome === "escaped",
+      activeTimeMs: Math.round(r.activeTimeMs),
+    }).catch(() => console.warn("Could not record leaderboard score."));
+  }
   writeJson(response, result.ok ? 200 : 409, {
     ok: result.ok,
     revision: result.state.revision,

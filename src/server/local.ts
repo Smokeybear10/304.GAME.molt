@@ -5,11 +5,20 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { createChallenge } from "../shared/content.ts";
 import { handleError, HttpError, routeApi } from "./http.ts";
-import { decodeState, type StateStore } from "./state.ts";
+import { decodeState, type LeaderboardEntry, type LeaderboardSnapshot, type StateStore } from "./state.ts";
 
 const directory = resolve(".local/runs");
 let pending: Promise<unknown> = Promise.resolve();
 const fileFor = (key: string) => resolve(directory, `${createHash("sha256").update(key).digest("hex")}.json`);
+const boardFileFor = (challengeId: string) => resolve(directory, `lb-${createHash("sha256").update(challengeId).digest("hex")}.json`);
+
+async function readBoard(challengeId: string): Promise<Record<string, LeaderboardEntry>> {
+  try {
+    return JSON.parse(await readFile(boardFileFor(challengeId), "utf8")) as Record<string, LeaderboardEntry>;
+  } catch {
+    return {};
+  }
+}
 
 async function readState(key: string) {
   try {
@@ -41,6 +50,33 @@ const store: StateStore = {
     });
     pending = operation.catch(() => undefined);
     return operation;
+  },
+  async recordScore(challengeId, entry) {
+    const operation = pending.then(async () => {
+      const board = await readBoard(challengeId);
+      const prev = board[entry.userId];
+      if (prev && prev.score >= entry.score) return;
+      board[entry.userId] = entry;
+      await mkdir(directory, { recursive: true });
+      const path = boardFileFor(challengeId);
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(board));
+      await rename(temporary, path);
+    });
+    pending = operation.catch(() => undefined);
+    return operation;
+  },
+  async readLeaderboard(challengeId, userId): Promise<LeaderboardSnapshot> {
+    await pending;
+    const board = await readBoard(challengeId);
+    const sorted = Object.values(board).sort((a, b) => b.score - a.score || a.activeTimeMs - b.activeTimeMs);
+    const idx = userId ? sorted.findIndex((e) => e.userId === userId) : -1;
+    return {
+      entries: sorted.slice(0, 5),
+      totalPlayers: sorted.length,
+      playerRank: idx >= 0 ? idx + 1 : null,
+      playerBestScore: idx >= 0 ? sorted[idx]!.score : null,
+    };
   },
 };
 

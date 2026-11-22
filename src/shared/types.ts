@@ -142,7 +142,7 @@ export type GameEvent =
   | { type: 'death'; id: number; x: number; y: number; species: Species; player: boolean }
   | { type: 'corpse'; id: number; x: number; y: number; species: Species }
   | { type: 'possess'; fromId: number; toId: number; corpseId: number; abandonedCorpseId: number; fromX: number; fromY: number; x: number; y: number; species: Species; healed: number }
-  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock'; dirX?: number; dirY?: number }
+  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock' | 'dash'; dirX?: number; dirY?: number }
   | { type: 'surface'; sourceId: number; x: number; y: number; dirX: number; dirY: number; kind: 'spit' | 'charge'; material: 'bread' | 'ceramic'; faction: Actor['faction'] }
   | { type: 'mutation'; mutationId: MutationId; x: number; y: number }
   | { type: 'blocked'; action: 'hop'; reason: string }

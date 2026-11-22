@@ -10,6 +10,11 @@ const direction = (x: number, y: number): Vec2 => {
   return length > 0.0001 && Number.isFinite(length) ? { x: x / length, y: y / length } : { x: 0, y: 0 };
 };
 const has = (run: Run, mutation: MutationId) => run.mutations.includes(mutation);
+function paceScale(run: Run): number {
+  const roomRamp = 0.58 + 0.42 * clamp(run.encounterTimeMs / 12000, 0, 1);
+  const runRamp = 0.72 + 0.38 * clamp(run.activeTimeMs / 100000, 0, 1);
+  return clamp(roomRamp * runRamp, 0.5, 1.15);
+}
 
 export function segmentDistance(point: Vec2, start: Vec2, end: Vec2): number {
   const dx = end.x - start.x;
@@ -230,12 +235,10 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   player.invulnerableMs = 600;
   player.lastSpecial = host.lastSpecial ? { ...host.lastSpecial } : null;
   run.playerId = player.id;
-  const opener = run.encounterIndex === 0;
   const initialEnemies = encounter.groups[0]!.map((spawn, index) => {
     const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
-    enemy.stunMs = opener ? 850 : 450;
-    enemy.basicCooldownMs = (opener ? 1400 : 1100) + index * 250;
-    enemy.specialCooldownMs = (opener ? 2100 : 1600) + index * 320;
+    enemy.basicCooldownMs = 1500 + index * 280;
+    enemy.specialCooldownMs = 2200 + index * 350;
     return enemy;
   });
   run.actors.push(player, ...initialEnemies);
@@ -426,17 +429,18 @@ function projectile(run: Run, actor: Actor, dx: number, dy: number, amount: numb
 }
 
 function enemyPattern(run: Run, actor: Actor, dx: number, dy: number, basic = false): BulletPattern {
-  const room = run.encounterIndex;
-  const ring = !basic && (actor.elite || (room > 0 && actor.volleyCount % 2 === 1));
+  const pace = paceScale(run);
+  const minutes = run.activeTimeMs / 60000;
+  const ring = !basic && (actor.elite || (minutes > 0.35 && actor.volleyCount % 2 === 1));
   const count = ring
-    ? actor.elite ? 18 : room >= 3 ? 16 : 12
+    ? actor.elite ? 18 : minutes > 1.2 ? 16 : 12
     : basic
-    ? room === 0 ? 1 : room >= 3 ? 5 : 3
-    : room === 0 ? 3 : room >= 4 ? 9 : room >= 2 ? 7 : 5;
+    ? minutes < 0.25 ? 1 : minutes > 1.0 ? 5 : 3
+    : minutes < 0.2 ? 3 : minutes > 1.3 ? 9 : minutes > 0.65 ? 7 : 5;
   return {
     kind: ring ? 'ring' : 'fan', angle: Math.atan2(dy, dx), count,
     spread: ring ? Math.PI * 2 : (count - 1) * (basic ? 0.275 : 0.25),
-    speed: basic ? 185 + room * 16 : ring ? 220 + room * 10 : 185 + room * 16,
+    speed: Math.round((ring ? 255 : 245) * pace),
     gap: ring ? 1.1 : 0,
   };
 }
@@ -483,7 +487,7 @@ function basicAttack(run: Run, actor: Actor, dx: number, dy: number, events: Gam
       dirX: dx, dirY: dy, fromX: actor.x, fromY: actor.y, targetX: actor.x + dx * 100, targetY: actor.y + dy * 100, hitIds: [], generation: 0, ...(actor.species === 'spitter' ? { pattern: enemyPattern(run, actor, dx, dy, true) } : {}) };
     return;
   }
-  actor.basicCooldownMs = actor.species === 'spitter' ? 1250 - run.encounterIndex * 80 : SPECIES[actor.species].basicMs * 2;
+  actor.basicCooldownMs = Math.round((actor.species === 'spitter' ? 1200 : SPECIES[actor.species].basicMs * 2) / paceScale(run));
   actor.facingX = dx;
   actor.facingY = dy;
   events.push({ type: 'attack', sourceId: actor.id, x: actor.x, y: actor.y, dirX: dx, dirY: dy, species: actor.species, kind: 'basic', phase: 'release', ...(pattern ? { pattern } : {}) });
@@ -529,7 +533,7 @@ function beginSpecial(run: Run, actor: Actor, dx: number, dy: number, generation
     durationMs: pattern?.kind === 'ring' ? actor.elite ? 900 : 800 : enemy ? (actor.species === 'beetle' ? 700 : 620) : actor.species === 'spitter' ? PLAYER_SPIT_WINDUP_MS : PLAYER_MELEE_WINDUP_MS,
     dirX: aim.x, dirY: aim.y, fromX: actor.x, fromY: actor.y, targetX: target.x, targetY: target.y, hitIds: [], generation, ...(actor.species === 'hopper' ? { aimDistance: pounceDistance(aimDistance) } : {}), ...(pattern ? { pattern } : {}) };
   actor.specialCooldownMs = enemy
-    ? actor.elite ? (actor.hp <= 4 ? 1900 : 2600) : Math.max(1700, SPECIES[actor.species].enemySpecialMs - run.encounterIndex * 200)
+    ? Math.round((actor.elite ? (actor.hp <= 4 ? 1900 : 2600) : SPECIES[actor.species].enemySpecialMs) / paceScale(run))
     : Math.round(SPECIES[actor.species].specialMs * (has(run, 'echo-tissue') ? 0.6 : 1));
   if (enemy) actor.volleyCount += 1;
   if (actor.faction === 'player') run.counters.specials += 1;
@@ -718,7 +722,7 @@ function moveEnemy(run: Run, actor: Actor, dx: number, dy: number, dt: number, r
   const desired = direction(dx, dy), player = getPlayer(run);
   const goal = retreat ? fitPosition(run, actor.x + desired.x * 180, actor.y + desired.y * 180, actor.radius)
     : fitPosition(run, player.x, player.y, actor.radius);
-  const travel = SPECIES[actor.species].speed * ENEMY_WALK_SPEED_SCALE * dt / 1000;
+  const travel = SPECIES[actor.species].speed * ENEMY_WALK_SPEED_SCALE * paceScale(run) * dt / 1000;
   let target = goal;
   if (canWalkTo(run, actor, actor, goal)) actor.navigation = null;
   else {

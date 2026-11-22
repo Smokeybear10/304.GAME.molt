@@ -391,7 +391,7 @@ export class GameInput {
   }
 
   get hasExplicitAim() {
-    return false;
+    return true;
   }
 
   clear() {

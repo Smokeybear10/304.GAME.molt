@@ -515,7 +515,7 @@ function beginSpecial(run: Run, actor: Actor, dx: number, dy: number, generation
     durationMs: pattern?.kind === 'ring' ? actor.elite ? 900 : 800 : enemy ? (actor.species === 'beetle' ? 700 : 620) : actor.species === 'spitter' ? PLAYER_SPIT_WINDUP_MS : PLAYER_MELEE_WINDUP_MS,
     dirX: aim.x, dirY: aim.y, fromX: actor.x, fromY: actor.y, targetX: target.x, targetY: target.y, hitIds: [], generation, ...(actor.species === 'hopper' ? { aimDistance: pounceDistance(aimDistance) } : {}), ...(pattern ? { pattern } : {}) };
   actor.specialCooldownMs = enemy
-    ? actor.elite ? 2600 : Math.max(1700, SPECIES[actor.species].enemySpecialMs - run.encounterIndex * 200)
+    ? actor.elite ? (actor.hp <= 4 ? 1900 : 2600) : Math.max(1700, SPECIES[actor.species].enemySpecialMs - run.encounterIndex * 200)
     : Math.round(SPECIES[actor.species].specialMs * (has(run, 'echo-tissue') ? 0.6 : 1));
   if (enemy) actor.volleyCount += 1;
   if (actor.faction === 'player') run.counters.specials += 1;
@@ -950,6 +950,7 @@ function beginDash(run: Run, player: Actor, dirX: number, dirY: number, events: 
   };
   player.basicCooldownMs = DASH_COOLDOWN_MS;
   player.invulnerableMs = Math.max(player.invulnerableMs, DASH_INVULNERABLE_MS);
+  events.push({ type: 'impact', sourceId: player.id, faction: player.faction, hitCount: 0, x: player.x, y: player.y, radius: 36, kind: 'dash', dirX: aim.x, dirY: aim.y });
   if (run.phase === 'playing' && has(run, 'shock-molt')) {
     run.projectiles = run.projectiles.filter(shot => shot.faction !== 'enemy' || distance(shot, player) > 140);
     const affected = run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && distance(actor, player) < 140);

@@ -1279,11 +1279,23 @@ export class BodyHopScene extends Phaser.Scene {
         y: visual.y - lift + anchor.y * squashY * unit,
       });
       if (actor.faction === "player" && actor.action?.kind === "dash") {
+        const dash = actor.action;
+        for (let step = 1; step <= 3; step++) {
+          const lag = step * 14;
+          const alpha = 0.45 - step * 0.11;
+          marks
+            .lineStyle(2.5, 0xc5e5c8, alpha)
+            .strokeCircle(visual.x - dash.dirX * lag, visual.y - dash.dirY * lag, actor.radius * (1 - step * 0.12));
+        }
         marks
-          .lineStyle(3, 0xc5e5c8, 0.85)
+          .lineStyle(3, 0xc5e5c8, 0.9)
           .strokeCircle(visual.x, visual.y, actor.radius + 7);
       }
       if (actor.faction === "enemy" && actor.maxHp > 1) {
+        if (actor.hp <= Math.ceil(actor.maxHp / 2)) {
+          const pulse = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.014) * 3;
+          marks.lineStyle(2.5, RED, 0.65).strokeCircle(visual.x, visual.y, actor.radius + 9 + pulse);
+        }
         const barW = 74;
         const barH = 7;
         const barX = visual.x - barW / 2;

@@ -159,10 +159,13 @@ function dispatch(events: GameEvent[]) {
         );
     }
     if (event.type === "encounterClear") {
+      healthNotice = `Chamber cleared · ${healthAmount(run.core)}/${run.maxCore} life.`;
+      healthNoticeKind = "heal";
+      healthNoticeUntil = performance.now() + 2600;
       hint(
         event.completedEncounters === ENCOUNTER_COUNT
           ? "The way is open. Escape above."
-          : "The chamber is clear. Head for the opening above.",
+          : "Chamber cleared! Head through the opening above for an upgrade.",
         6000
       );
     }
@@ -643,15 +646,15 @@ function renderReward() {
     return;
   }
   showScreen(`<section class="mutation-reward" aria-labelledby="reward-title">
-    <span class="eyebrow">CHAMBER ${run.encounterIndex + 1} CLEARED</span>
-    <h2 id="reward-title">Choose a mutation.</h2><p class="reward-rule">It stays with you in every body.</p>
+    <span class="eyebrow">CHAMBER ${run.encounterIndex + 1} CLEARED · +1 HEART</span>
+    <h2 id="reward-title">Choose an upgrade.</h2><p class="reward-rule">Upgrades stack across all six chambers.</p>
     ${dailyPreviewMarkup()}
     <div class="mutation-options">${run.rewardOffers
       .map((id, index) => mutationChoice(id, `reward-${index}`))
       .join("")}</div>
     ${
       run.mutations.length
-        ? `<div class="carried-mutations"><span>CARRYING</span>${run.mutations
+        ? `<div class="carried-mutations"><span>STACKED</span>${run.mutations
             .map(
               (id) =>
                 `<span class="carried-mutation">${mutationSpecimen(
@@ -664,14 +667,14 @@ function renderReward() {
     }
     <button id="skip-reward" class="text-button" type="button">${
       run.mutations.length
-        ? "Keep my current mutations"
-        : "Continue without a mutation"
+        ? "Keep my current upgrades"
+        : "Continue without an upgrade"
     }</button>
   </section>`);
   paintRewardSpecimens();
   run.rewardOffers.forEach((id, index) =>
     bind(`reward-${index}`, () => {
-      if (run.mutations.length >= 2) {
+      if (run.mutations.length >= 5) {
         replacement = id;
         updateUi(true);
         return;
@@ -691,11 +694,11 @@ function renderPause() {
   const reason = !graphicsLost && !conflict ? pauseReason : "";
   const checkpointNote =
     run.resumePhase === "cleared"
-      ? "Your current body and cleared chamber are saved here."
+      ? "Your cleared chamber and upgrades are saved here."
       : run.resumePhase === "reward"
-      ? "Your mutation choices are saved. You can leave and return here."
+      ? "Your upgrade choices are saved. You can leave and return here."
       : "Leaving during combat restarts this chamber from its entrance.";
-  showScreen(`<span class="eyebrow">HOLD THAT BODY</span><h2>${
+  showScreen(`<span class="eyebrow">PAUSED</span><h2>${
     graphicsLost
       ? "Graphics interrupted."
       : conflict
@@ -797,29 +800,6 @@ function renderResult(result: RunResult) {
   const dailyRecord = result.encounterRecords.find(
     (room) => room.encounterIndex === daily.encounterIndex
   );
-  const dailyTransfers = dailyRecord
-    ? Math.max(
-        0,
-        (dailyRecord.combatEndLineageIndex ?? result.lineage.length) -
-          dailyRecord.startLineageIndex -
-          1
-      )
-    : 0;
-  const focus = dailyRecord ?? result.encounterRecords.at(-1)!;
-  const focusName = getEncounter(run.challenge, focus.encounterIndex).name;
-  const focusPath = result.lineage
-    .slice(
-      focus.startLineageIndex,
-      focus.combatEndLineageIndex ?? result.lineage.length
-    )
-    .map((entry) => SPECIES[entry.species].name)
-    .join(" → ");
-  const focusMutations =
-    focus.entryMutations.map((id) => MUTATIONS[id].name).join(" + ") || "none";
-  const fightHeading = dailyRecord
-    ? `Today’s chamber · ${focus.encounterIndex + 1}/${ENCOUNTER_COUNT}`
-    : `Chamber ${focus.encounterIndex + 1}`;
-  const fightRecord = `${fightHeading} — ${focusName}: ${focus.outcome}\nBodies: ${focusPath}\nMutations in that fight: ${focusMutations}`;
   document.body.dataset.result = "true";
   showScreen(`<span class="eyebrow">${
     escaped
@@ -827,69 +807,33 @@ function renderResult(result: RunResult) {
       : `RUN ENDED · CHAMBER ${result.completedEncounters + 1} OF 6`
   }</span>
     <h1 id="result-heading" tabindex="-1">${
-      escaped ? "The worm got out." : "The worm died."
+      escaped ? "You escaped." : "You fell."
     }</h1>
     <p id="result-cause" class="result-cause"></p>
     <figure class="last-body">
       <canvas id="result-portrait" width="560" height="200" aria-hidden="true"></canvas>
       <figcaption><span>${
-        escaped ? "ESCAPED WEARING" : "LAST BODY"
-      }</span><strong>${SPECIES[last.species].name}</strong><small>${
-    result.lineage.length === 1
-      ? "Your starting body"
-      : `Taken in chamber ${last.encounterIndex + 1}`
-  } · worn for ${clock(result.activeTimeMs - last.atMs)}</small></figcaption>
+        escaped ? "VICTORY BUILD" : "RUN BUILD"
+      }</span><strong>${result.counters.kills} ${
+    result.counters.kills === 1 ? "enemy" : "enemies"
+  } defeated</strong><small>${clock(result.activeTimeMs)} active · ${
+    result.mutations.length
+  } ${result.mutations.length === 1 ? "upgrade" : "upgrades"}</small></figcaption>
     </figure>
-    <p class="result-summary">${result.counters.hops} ${
-    result.counters.hops === 1 ? "switch" : "switches"
-  } · ${clock(result.activeTimeMs)} active${
+    <p class="result-summary">${result.completedEncounters}/${ENCOUNTER_COUNT} chambers cleared${
     store.bestProgress > result.completedEncounters
       ? `<br>Best: ${store.bestProgress}/${ENCOUNTER_COUNT} chambers cleared`
       : ""
   }</p>
-    <p class="result-build">${mutations || "No mutations"}</p>
+    <p class="result-build">${mutations || "No upgrades"}</p>
     <div class="result-actions">
       <button id="retry-button" class="primary-button" type="button">${store.status === "conflict" ? "Reload saved run" : "Retry this escape"}</button>
-      <button id="copy-result" class="text-button" type="button">Copy body record</button>
+      <button id="copy-result" class="text-button" type="button">Copy run record</button>
     </div>
-    <div id="manual-copy" hidden><label for="result-copy-text">Select and copy your record</label><textarea id="result-copy-text" readonly rows="5"></textarea><button id="close-copy" class="text-button" type="button">Close</button></div>
-    <details class="body-record"><summary>${
-      dailyRecord
-        ? `${daily.name} · ${
-            dailyRecord.outcome === "cleared" ? "cleared" : "run ended here"
-          } · body record`
-        : result.lineage.length === 1
-        ? "View your body record"
-        : `View all ${result.lineage.length} bodies`
-    }</summary><section class="daily-record"><h2>Today’s chamber · ${
-    daily.name
-  }</h2>${
-    dailyRecord
-      ? `<p>${
-          dailyRecord.outcome === "cleared" ? "Cleared" : "Run ended here"
-        }. ${dailyTransfers} combat ${
-          dailyTransfers === 1 ? "switch" : "switches"
-        }.</p><p>${focusPath}</p><p>Mutations on entry: ${focusMutations}.</p>`
-      : "<p>Not reached this run.</p>"
-  }</section><ol>${result.lineage
-    .map((entry, index) => {
-      const room = result.encounterRecords[entry.encounterIndex];
-      const afterClear =
-        room?.outcome === "cleared" &&
-        room.combatEndLineageIndex !== null &&
-        index >= room.combatEndLineageIndex;
-      return `<li><span>${SPECIES[entry.species].name}</span><small>${
-        afterClear ? "After ch." : "Ch."
-      } ${entry.encounterIndex + 1} · ${clock(entry.atMs)}–${clock(
-        result.lineage[index + 1]?.atMs ?? result.activeTimeMs
-      )}</small></li>`;
-    })
-    .join("")}</ol><p>${result.counters.kills} ${
-    result.counters.kills === 1 ? "enemy" : "enemies"
-  } defeated.</p></details>`);
+    <div id="manual-copy" hidden><label for="result-copy-text">Select and copy your record</label><textarea id="result-copy-text" readonly rows="5"></textarea><button id="close-copy" class="text-button" type="button">Close</button></div>`);
   overlay.firstElementChild?.classList.add("result-screen");
   element("result-cause").textContent = escaped
-    ? "Six chambers. One parasite still alive."
+    ? "Six chambers cleared. The Keeper is down."
     : result.cause || "You ran out of life.";
   const canvas = element<HTMLCanvasElement>("result-portrait");
   const ctx = canvas.getContext("2d");
@@ -932,11 +876,13 @@ function renderResult(result: RunResult) {
   const record = `MOLT · ${run.challenge.date}\n${
     escaped
       ? "Escaped all 6 chambers"
-      : `Died in chamber ${result.completedEncounters + 1}`
-  } · ${clock(result.activeTimeMs)} active · ${result.counters.hops} ${
-    result.counters.hops === 1 ? "switch" : "switches"
-  }\n${fightRecord}${
-    dailyRecord ? "" : `\nToday’s chamber — ${daily.name}: not reached`
+      : `Fell in chamber ${result.completedEncounters + 1}`
+  } · ${clock(result.activeTimeMs)} · ${result.counters.kills} kills\nBuild: ${
+    mutations || "none"
+  }${
+    dailyRecord
+      ? `\nToday’s chamber (${daily.name}): ${dailyRecord.outcome}`
+      : `\nToday’s chamber (${daily.name}): not reached`
   }\n${postUrl ?? result.contentVersion}`;
   bind("copy-result", () => void copyResult(record));
   bind("close-copy", () => {

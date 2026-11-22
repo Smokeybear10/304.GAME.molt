@@ -309,6 +309,9 @@ export class GameAudio {
           this.tone(95, 72, 0.065, 0.1 * volume, "triangle");
           this.noise(0.06, 0.14 * volume, 950);
           this.noise(0.018, 0.045 * volume, 1500, "bandpass", 0.018);
+        } else if (event.kind === "dash") {
+          this.tone(240, 480, 0.085, 0.06, "sine");
+          this.noise(0.11, 0.14, 1800, "bandpass");
         } else {
           this.tone(75, 60, 0.1, 0.11 * volume, "triangle");
           this.noise(0.1, 0.13 * volume, 650);

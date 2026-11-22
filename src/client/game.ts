@@ -17,7 +17,7 @@ import {
   PLAYER_BULLET_RADIUS,
   SPECIES,
 } from "../shared/content";
-import { canSwitchBody, getNearbyBody, getPlayer, previewSpecial } from "../shared/engine";
+import { getPlayer, previewSpecial } from "../shared/engine";
 import type { Actor, GameEvent, Run, Species, Vec2 } from "../shared/types";
 import type { GameInput } from "./input";
 import { createFeastFloor } from "./room-art";
@@ -993,8 +993,6 @@ export class BodyHopScene extends Phaser.Scene {
     }
     const input = this.hooks.getInput(),
       player = actors.find((actor) => actor.id === run.playerId)!;
-    const nearbyBody = input ? input.approachingBody : getNearbyBody(run);
-    const switchReady = nearbyBody && !player.action && canSwitchBody(run, nearbyBody.id);
     const aliveCorpses = new Set<number>();
     for (const corpse of run.corpses) {
       if (corpse.consumed) continue;
@@ -1011,32 +1009,6 @@ export class BodyHopScene extends Phaser.Scene {
         ground.lineStyle(1.5, LIGHT, 0.22)
           .strokeEllipse(corpse.x, corpse.y + corpse.radius * 0.35,
             corpse.radius * 2.2, corpse.radius * 1.1);
-      }
-      if (nearbyBody?.id === corpse.id) {
-        const pulse = switchReady && !this.hooks.reducedMotion() ? Math.sin(this.elapsed * 0.006) * 2 : 0;
-        const reach = corpse.radius + 12 + pulse;
-        const color = switchReady ? 0xc5e5c8 : PAPER;
-        for (const [width, stroke] of [
-          [this.screenSize(4, 2.4), BLACK],
-          [this.screenSize(2, 1.2), color],
-        ] as const) {
-          marks.lineStyle(width, stroke, switchReady ? 1 : 0.45);
-          for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-            const x = corpse.x + sx * reach, y = corpse.y + sy * reach * 0.6;
-            marks.lineBetween(x, y, x - sx * 10, y);
-            marks.lineBetween(x, y, x, y - sy * 8);
-          }
-        }
-        const gap = Math.hypot(corpse.x - player.x, corpse.y - player.y);
-        if (gap > 42 && canSwitchBody(run, corpse.id)) {
-          const steps = Math.ceil(gap / 16);
-          marks.fillStyle(color, switchReady ? 0.6 : 0.25);
-          for (let index = 1; index < steps; index++) {
-            const t = index / steps;
-            marks.fillCircle(player.x + (corpse.x - player.x) * t,
-              player.y + (corpse.y - player.y) * t, 1.3);
-          }
-        }
       }
       const birth = this.corpseBirths.get(corpse.id);
       const deathPose = this.deathPoses.get(corpse.id);
@@ -1306,6 +1278,20 @@ export class BodyHopScene extends Phaser.Scene {
         x: visual.x + anchor.x * squashX * unit,
         y: visual.y - lift + anchor.y * squashY * unit,
       });
+      if (actor.faction === "player" && actor.action?.kind === "dash") {
+        marks
+          .lineStyle(3, 0xc5e5c8, 0.85)
+          .strokeCircle(visual.x, visual.y, actor.radius + 7);
+      }
+      if (actor.faction === "enemy" && actor.maxHp > 1) {
+        const barW = 74;
+        const barH = 7;
+        const barX = visual.x - barW / 2;
+        const barY = visual.y - actor.radius - 22;
+        marks.fillStyle(BLACK, 0.78).fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+        marks.fillStyle(0x453534, 1).fillRect(barX, barY, barW, barH);
+        marks.fillStyle(RED, 1).fillRect(barX, barY, barW * Math.max(0, actor.hp / actor.maxHp), barH);
+      }
       ground
         .fillStyle(BLACK, (echo ? 0.05 : 0.16) * presence)
         .fillEllipse(

@@ -12,6 +12,7 @@ import {
   paintTitle,
 } from "./art";
 import {
+  DASH_COOLDOWN_MS,
   TICK_MS,
   ENCOUNTER_COUNT,
   MUTATIONS,
@@ -326,7 +327,7 @@ function healthPips(value: number, maximum: number) {
 }
 
 function healthExplanation() {
-  return "Walk onto a fresh body to switch and recover 1 life, up to 3. At 0 life, the run ends.";
+  return "Clear a chamber to recover 1 heart, up to 3. Dash with Space or Click to pass through bullets. At 0 hearts, the run ends.";
 }
 
 function updateHud() {
@@ -345,8 +346,7 @@ function updateHud() {
     element("life-group").classList.toggle("low-life", lowLife);
     element("life-warning").hidden = !lowLife;
     element("hud").dataset.lowLife = String(lowLife);
-    element("host-name").textContent =
-      SPECIES[player.species].name.toUpperCase();
+    element("host-name").textContent = `${run.mutations.length} / 5`;
     element("health-note").title = healthExplanation();
     element("chamber-value").textContent = `${String(
       run.encounterIndex + 1
@@ -356,71 +356,51 @@ function updateHud() {
     );
     element("mutation-strip").innerHTML = run.mutations.length
       ? run.mutations
-          .map((id) => {
-            if (id !== "echo-tissue")
-              return `<span title="${MUTATIONS[id].description}">${MUTATIONS[id].name}</span>`;
-            const stored = player.lastSpecial;
-            if (!stored)
-              return '<span title="Attack to store what this body repeats when you take another body.">Echo: attack to store</span>';
-            const arrows = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"];
-            const direction =
-              (Math.round(
-                Math.atan2(stored.dirY, stored.dirX) / (Math.PI / 4)
-              ) +
-                8) %
-              8;
-            return `<span class="echo-armed" title="This body repeats ${
-              SPECIES[stored.species].action
-            } in its stored direction when you take another body.">Echo: ${
-              SPECIES[stored.species].action
-            } ${arrows[direction]}</span>`;
-          })
+          .map(
+            (id) =>
+              `<span title="${MUTATIONS[id].description}">${MUTATIONS[id].name}</span>`
+          )
           .join("")
       : "";
-    element("ability-name").textContent =
-      SPECIES[player.species].action.toUpperCase();
     if (touchControls)
       element("control-tip").innerHTML =
-        player.species === "spitter"
-          ? "Hold Spit to keep firing.<br>Drag to steer your shots."
-          : player.species === "hopper"
-          ? "Drag to set your landing.<br>Short drag, short Pounce."
-          : "Drag your attack to aim.<br>Tap to target a threat.";
+        "Auto-fires at nearest foe.<br>Tap Dash to dodge bullets.";
   }
-  setText("health-note",
-    run.core <= 0 ? "No life left. This run is over."
-      : performance.now() < healthNoticeUntil ? healthNotice
-      : lowLife ? "1 LIFE · Walk onto a fresh body to heal."
-      : "Walk onto a fresh body. Recover 1 life."
+  const dashReady =
+    player.stunMs <= 0 &&
+    player.basicCooldownMs <= 0 &&
+    (!player.action || player.action.stage === "windup");
+  setText("ability-name", "DASH");
+  setText(
+    "health-note",
+    run.core <= 0
+      ? "No life left. This run is over."
+      : performance.now() < healthNoticeUntil
+      ? healthNotice
+      : lowLife
+      ? "1 LIFE · Clear the room to heal +1."
+      : "Space / Click to dash through bullets."
   );
-  element("health-note").dataset.notice = performance.now() < healthNoticeUntil ? healthNoticeKind : "";
-  const abilityReady =
-    !player.action && player.stunMs <= 0 && player.specialCooldownMs <= 0;
+  element("health-note").dataset.notice =
+    performance.now() < healthNoticeUntil ? healthNoticeKind : "";
   setText(
     "ability-state",
     player.stunMs > 0
       ? "STUNNED"
-      : player.action
-      ? "ACTING"
-      : player.specialCooldownMs > 0
-      ? `${(player.specialCooldownMs / 1000).toFixed(1)}s`
+      : player.action?.kind === "dash"
+      ? "DASHING"
+      : player.basicCooldownMs > 0
+      ? `${(player.basicCooldownMs / 1000).toFixed(1)}s`
       : "READY"
   );
-  element("ability-button").classList.toggle("cooling", !abilityReady);
+  element("ability-button").classList.toggle("cooling", !dashReady);
   element("ability-button").style.setProperty(
     "--charge",
-    String(
-      Math.max(
-        0,
-        1 - player.specialCooldownMs / SPECIES[player.species].specialMs
-      )
-    )
+    String(Math.max(0, 1 - player.basicCooldownMs / DASH_COOLDOWN_MS))
   );
   element("ability-button").title = touchControls
-    ? player.species === "spitter"
-      ? "Hold to keep firing Spit; drag to aim"
-      : `Drag to aim ${SPECIES[player.species].action}, then release`
-    : `${SPECIES[player.species].action} · click or Space`;
+    ? "Tap to dash through enemy bullets"
+    : "Dash through bullets · Click or Space";
   element("sound-button").dataset.muted = String(audio.muted);
   element("sound-button").title = audio.muted ? "Unmute sound" : "Mute sound";
   element("sound-button").setAttribute(
@@ -556,34 +536,26 @@ function renderReady() {
         : `<h1>${chamber.name}</h1>`
     }
     <canvas id="portrait" class="intro-creature" width="240" height="150" aria-hidden="true"></canvas>
-    <p>${first ? "Kill an enemy.<br>Choose your next body." : chamber.description}</p>
+    <p>${first ? "Dodge the swarm.<br>Stack wild upgrades." : chamber.description}</p>
     ${
       first
-        ? `<p class="intro-rule">One hit drops an enemy.<br>Each body has one attack.</p><p class="health-rule" title="${healthExplanation()}"><strong>3 hearts. At 0, the run ends.</strong><br>Walk onto a fresh body to switch and recover 1 life.</p>`
-        : `<p class="small-copy">${
-            SPECIES[getPlayer(run).species].name
-          } · ${healthAmount(run.core)}/${run.maxCore} life · ${
+        ? `<p class="intro-rule">Auto-fires where you aim.<br>Dash through bullets with Click or Space.</p><p class="health-rule" title="${healthExplanation()}"><strong>3 hearts. At 0, the run ends.</strong><br>Clear a chamber to heal 1 heart and pick an upgrade.</p>`
+        : `<p class="small-copy">${healthAmount(run.core)}/${run.maxCore} life · ${
             run.mutations.length
-          } ${run.mutations.length === 1 ? "mutation" : "mutations"}</p>`
+          } ${run.mutations.length === 1 ? "upgrade" : "upgrades"}</p>`
     }
     <button id="begin-button" class="primary-button" type="button">${
       restored
         ? "Resume from checkpoint"
         : first
-        ? "Find a way out"
+        ? "Start escape"
         : "Enter chamber"
     }</button>
     <p class="fine-print">${
       first
         ? touchControls
-          ? getPlayer(run).species === "spitter"
-            ? "Left thumb moves. Hold Spit to fire; drag to aim."
-            : `Left thumb moves. Drag ${
-                SPECIES[getPlayer(run).species].action
-              } to aim; release to use it.`
-          : `WASD moves · mouse aims · click / Space: ${
-              SPECIES[getPlayer(run).species].action
-            }`
+          ? "Left thumb moves · auto-fires at foes · tap Dash to dodge"
+          : "WASD moves · mouse aims (auto-fires) · Click / Space to Dash"
         : "Progress saved. You can leave and return here."
     }</p>`);
   drawPortrait(getPlayer(run).species, first);
@@ -786,10 +758,10 @@ function renderSettings() {
     }></label>
     <p class="small-copy">${
       touchControls
-        ? "Drag the left pad to move. Hold Spit to keep firing; drag to aim. For Ram or Pounce, drag to aim and release to attack. A shorter drag makes a shorter Pounce. Walk onto a fresh body to switch and recover 1 life."
-        : "WASD / arrows: move. Mouse: aim. Left-click / Space: attack. Hold to repeat Spit; press again for each Ram or Pounce. Walk onto a fresh body to switch and recover 1 life. Escape: pause."
+        ? "Drag the left pad to move. You fire automatically at the nearest enemy. Tap Dash to dodge through bullets. Clear a chamber to heal 1 heart and pick an upgrade."
+        : "WASD / arrows: move. Mouse: aim (auto-fires toward your cursor). Left-click / Space / Shift: Dash through bullets. Clear a chamber to heal 1 heart and stack upgrades. Escape: pause."
     }</p>
-    <p class="fine-print">Enemies die in one hit. Kills leave bodies you can choose to use once. Clear the chamber, then leave through the opening above.</p>
+    <p class="fine-print">Clear all waves, then leave through the opening above to claim your next upgrade.</p>
     <p class="health-rule"><strong>Red hearts = life.</strong> ${healthExplanation()}<br>Dodge with the small ring at your center.</p>
     <button id="close-settings" class="primary-button" type="button">${recoveredResult ? "Back to body record" : "Back to the body"}</button>`);
   element<HTMLInputElement>("setting-sound").addEventListener(
@@ -1043,8 +1015,8 @@ function connectGame() {
     '<div class="loading"><span class="little-worm"></span><p>Finding a body…</p><p class="loading-recovery">Taking a while? <a href="">Reload this game</a>.</p></div>';
   overlay.classList.remove("hidden");
   element("control-tip").innerHTML = touchControls
-    ? "Drag your attack to aim.<br>Tap to target a threat."
-    : "<span><kbd>WASD</kbd> move · mouse aim</span><span>Click / <kbd>Space</kbd> attack</span>";
+    ? "Auto-fires at nearest foe.<br>Tap Dash to dodge bullets."
+    : "<span><kbd>WASD</kbd> move · mouse aims</span><span>Click / <kbd>Space</kbd> dash</span>";
   element(
     "challenge-label"
   ).textContent = `DAILY ESCAPE · ${store.bootstrap.challenge.date

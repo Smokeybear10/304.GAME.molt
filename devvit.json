@@ -14,7 +14,7 @@
   "menu": {
     "items": [
       {
-        "label": "Post today's BODY HOP",
+        "label": "Post today's MOLT",
         "description": "Create or open today's shared escape.",
         "location": "subreddit",
         "forUserType": "moderator",
@@ -35,7 +35,7 @@
     "subreddit": {
       "daily-posts": {
         "type": "boolean",
-        "label": "Post a new BODY HOP challenge every day at 00:00 UTC",
+        "label": "Post a new MOLT challenge every day at 00:00 UTC",
         "defaultValue": false
       }
     }

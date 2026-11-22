@@ -13,7 +13,7 @@ export function getPostUrl(): string | null {
 
 export function openGame(event: MouseEvent): void {
   if (isReddit) {
-    requestExpandedMode(event, "game", { title: "BODY HOP" });
+    requestExpandedMode(event, "game", { title: "MOLT" });
     return;
   }
   const target = new URL("game.html", window.location.href);

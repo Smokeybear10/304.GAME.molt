@@ -1,6 +1,15 @@
 import { WORLD_WIDTH, WORLD_HEIGHT } from "../shared/content";
 import type { Rect } from "../shared/types";
 
+const DISHES = [
+  { glaze: "#4d5b5c", rim: "#a8ad99", edge: "#354e53", stain: "#776846", ash: "#303e3c" },
+  { glaze: "#535b4b", rim: "#b1aa83", edge: "#4b5140", stain: "#81743f", ash: "#3d4332" },
+  { glaze: "#50545d", rim: "#aaa6a3", edge: "#454954", stain: "#767071", ash: "#323642" },
+  { glaze: "#465954", rim: "#93a38d", edge: "#354a43", stain: "#8b9762", ash: "#2c423a" },
+  { glaze: "#594b43", rim: "#a28d73", edge: "#514039", stain: "#94714a", ash: "#302c2a" },
+  { glaze: "#534852", rim: "#a69b8c", edge: "#493b47", stain: "#976b72", ash: "#382b37" },
+] as const;
+
 function fill(
   ctx: CanvasRenderingContext2D,
   outline: string,
@@ -29,7 +38,7 @@ function line(
   ctx.stroke(new Path2D(outline));
 }
 
-function bread(ctx: CanvasRenderingContext2D, wall: Rect) {
+function bread(ctx: CanvasRenderingContext2D, wall: Rect, scorched: boolean) {
   const { x, y, width: w, height: h } = wall;
   ctx.save();
   ctx.translate(x, y);
@@ -87,6 +96,27 @@ function bread(ctx: CanvasRenderingContext2D, wall: Rect) {
     "#d2a263",
     2
   );
+  if (scorched) {
+    const face = h - crust;
+    fill(
+      ctx,
+      `M 8 ${face * 0.2} C ${w * 0.28} ${face * 0.12} ${w * 0.52} ${face * 0.25} ${w * 0.72} ${face * 0.4}
+       L ${w * 0.61} ${face * 0.43} C ${w * 0.43} ${face * 0.31} ${w * 0.22} ${face * 0.29} 9 ${face * 0.3} Z`,
+      "#3b302bb0"
+    );
+    fill(
+      ctx,
+      `M 12 ${face * 0.46} C ${w * 0.34} ${face * 0.39} ${w * 0.61} ${face * 0.59} ${w - 12} ${face * 0.73}
+       L ${w * 0.8} ${face * 0.76} C ${w * 0.56} ${face * 0.65} ${w * 0.31} ${face * 0.56} 13 ${face * 0.55} Z`,
+      "#322c28b8"
+    );
+    fill(
+      ctx,
+      `M ${w * 0.56} ${h - crust + 10} L ${w * 0.7} ${h - crust + 12} L ${w * 0.85} ${h - crust + 9}
+       L ${w - 9} ${h - 6} L ${w * 0.74} ${h - 5} L ${w * 0.61} ${h - 7} Z`,
+      "#302923b8"
+    );
+  }
   let seed = (x * 317 + y * 97 + w) >>> 0;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -125,6 +155,102 @@ function bread(ctx: CanvasRenderingContext2D, wall: Rect) {
   ctx.restore();
 }
 
+function ribs(ctx: CanvasRenderingContext2D, wall: Rect) {
+  ctx.save();
+  ctx.translate(wall.x, wall.y);
+  ctx.scale(wall.width / 90, wall.height / 220);
+  ctx.fillStyle = "#453a34";
+  ctx.fillRect(0, 0, 90, 220);
+  ctx.beginPath();
+  ctx.rect(1, 1, 88, 218);
+  ctx.clip();
+  if (wall.x > WORLD_WIDTH / 2) {
+    ctx.translate(90, 0);
+    ctx.scale(-1, 1);
+  }
+  fill(ctx, "M2 4 L29 7 L54 3 L86 7 L88 51 L84 105 L88 158 L86 215 L59 211 L32 216 L3 211 Z", "#795e54");
+  fill(ctx, "M69 6 L87 7 L88 54 L82 103 L88 155 L86 213 L73 210 L78 155 L72 99 L76 51 Z", "#604941");
+  fill(ctx, "M3 198 L27 204 L47 201 L70 207 L86 203 L86 217 L57 214 L31 218 L3 213 Z", "#514139");
+  fill(ctx, "M9 11 L19 8 L25 25 L20 62 L25 83 L20 117 L25 139 L20 172 L25 195 L17 210 L9 207 L12 170 L8 140 L12 112 L8 81 L12 54 Z", "#928a73", "#574a3e", 1.5);
+  for (const [y, bend] of [[35, -3], [91, 3], [147, -1]] as const) {
+    fill(ctx,
+      `M16 ${y + 4} C35 ${y - 18} 63 ${y - 8 + bend} 78 ${y + 13}
+       Q83 ${y + 21} 75 ${y + 28} C59 ${y + 9 + bend} 39 ${y + 5} 19 ${y + 17} Z`,
+      "#513e35"
+    );
+    fill(ctx,
+      `M15 ${y} C34 ${y - 20} 62 ${y - 11 + bend} 77 ${y + 10}
+       Q81 ${y + 17} 74 ${y + 23} C59 ${y + 5 + bend} 38 ${y + 1} 18 ${y + 13} Z`,
+      "#aaa087", "#655a49", 1.5
+    );
+    line(ctx, `M20 ${y + 1} C38 ${y - 12} 58 ${y - 7 + bend} 72 ${y + 10}`, "#bab198", 2.5);
+    fill(ctx, `M14 ${y - 3} Q23 ${y - 6} 24 ${y + 3} L21 ${y + 13} L13 ${y + 15} Z`, "#a1977e");
+    line(ctx, `M31 ${y + 25} C47 ${y + 18} 65 ${y + 29} 74 ${y + 42}`, "#947b68", 3);
+  }
+  line(ctx, "M5 8 L27 11 L46 7 L67 10 L83 8", "#a18d73", 2.5);
+  ctx.restore();
+}
+
+function chamberWear(ctx: CanvasRenderingContext2D, chamber: number) {
+  const dish = DISHES[chamber]!;
+  ctx.save();
+  if (chamber === 1) {
+    for (const [x, y, flip] of [[44, 320, 1], [676, 700, -1]]) {
+      ctx.save();
+      ctx.translate(x!, y!);
+      ctx.scale(flip!, 1);
+      fill(ctx, "M-32-118 C42-132 121-83 135-12 C142 42 102 106 35 122 L-35 119 Z", `${dish.stain}24`);
+      for (const inset of [0, 9, 17])
+        line(ctx, `M-12 ${-107 + inset} C${112 - inset} -124 ${164 - inset} 56 8 ${111 - inset}`, `${dish.stain}42`, 2.5);
+      ctx.restore();
+    }
+  } else if (chamber === 2) {
+    for (const outline of [
+      "M28 270 L74 302 L65 335 L111 365 L119 417 M65 335 L35 373 M111 365 L165 347",
+      "M692 650 L651 612 L660 567 L607 530 L603 483 M660 567 L684 531 M607 530 L562 548",
+      "M28 830 L77 793 L109 807 L137 768 M77 793 L65 752",
+    ]) {
+      line(ctx, outline, `${dish.ash}88`, 2);
+      ctx.save();
+      ctx.translate(2, 1);
+      line(ctx, outline, "#c8c4b32c", 1);
+      ctx.restore();
+    }
+  } else if (chamber === 3) {
+    for (const [x, y, flip] of [[31, 225, 1], [689, 605, -1], [30, 860, 1]]) {
+      ctx.save();
+      ctx.translate(x!, y!);
+      ctx.scale(flip!, 1);
+      fill(ctx, "M-12-62 C22-76 45-58 47-43 C76-57 105-23 86-7 C112 14 78 44 55 36 C56 63 22 73-9 57 Z", "#87925a35");
+      fill(ctx, "M-7-40 C17-57 39-28 32-17 C60-31 81-6 64 10 C74 30 39 48 28 31 C12 49-5 32-13 21 Z", "#b6b17b1c");
+      for (const [px, py] of [[22, -29], [47, -3], [31, 22], [9, 8]]) {
+        line(ctx, `M${px} ${py} l7 -4 l4 5 m-4 -5 l-2 -7`, "#b4b68b42", 1.4);
+      }
+      ctx.restore();
+    }
+  } else if (chamber === 4) {
+    for (const [x, y, angle] of [[35, 350, -0.22], [685, 720, Math.PI - 0.2]]) {
+      ctx.save();
+      ctx.translate(x!, y!);
+      ctx.rotate(angle!);
+      fill(ctx, "M-24-94 C65-99 146-27 126 21 C115 57 67 91-28 85 Z", "#29282a42");
+      for (let index = 0; index < 5; index++) {
+        const y = index * 21 - 58;
+        line(ctx, `M-18 ${y} C34 ${y - 20} 83 ${y + 13} ${117 - index * 9} ${y + 35}`, "#25282b55", 7 - index * 0.6);
+        line(ctx, `M-8 ${y + 5} C29 ${y - 10} 61 ${y + 12} 75 ${y + 23}`, "#a2886233", 1.5);
+      }
+      ctx.restore();
+    }
+  } else if (chamber === 5) {
+    fill(ctx, "M28 172 C84 139 141 178 124 237 C104 287 52 267 28 302 Z", "#7d404b42");
+    fill(ctx, "M692 730 C628 683 547 717 576 785 C603 843 659 825 692 864 Z", "#7d404b42");
+    for (const y of [210, 229, 248])
+      line(ctx, `M31 ${y} C65 ${y - 9} 98 ${y + 7} 115 ${y - 2}`, "#b38b8523", 2);
+    line(ctx, "M625 780 C594 777 586 749 613 733 C638 717 665 738 660 756 C657 769 636 773 629 759", "#b38b8533", 3);
+  }
+  ctx.restore();
+}
+
 export function createFeastFloor(
   obstacles: Rect[] = [],
   chamber = 0
@@ -134,6 +260,8 @@ export function createFeastFloor(
   canvas.height = WORLD_HEIGHT;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas rendering is unavailable");
+  chamber = Math.max(0, Math.min(DISHES.length - 1, chamber));
+  const palette = DISHES[chamber]!;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.fillStyle = "#282b29";
@@ -142,7 +270,7 @@ export function createFeastFloor(
   const dish = new Path2D(
     "M 38 7 L 680 7 Q 711 9 713 38 L 713 922 Q 712 950 679 953 L 39 953 Q 8 952 7 923 L 7 39 Q 8 9 38 7 Z"
   );
-  ctx.fillStyle = "#a8ad99";
+  ctx.fillStyle = palette.rim;
   ctx.fill(dish);
   ctx.strokeStyle = "#171f20";
   ctx.lineWidth = 4;
@@ -150,7 +278,7 @@ export function createFeastFloor(
   line(
     ctx,
     "M 18 105 L 18 47 Q 18 18 45 18 L 263 18 M 455 18 L 674 18 Q 701 18 701 47 L 701 114 M 701 774 L 701 913 Q 701 941 674 941 L 589 941 M 455 941 L 206 941 M 18 620 L 18 519",
-    "#354e53",
+    palette.edge,
     4
   );
   line(
@@ -163,14 +291,19 @@ export function createFeastFloor(
   const well = new Path2D(
     "M 45 27 L 675 27 Q 693 28 693 47 L 693 911 Q 691 932 674 933 L 46 933 Q 27 931 27 911 L 27 47 Q 28 28 45 27 Z"
   );
-  ctx.fillStyle = "#525d5d";
+  ctx.fillStyle = palette.glaze;
   ctx.fill(well);
-  ctx.strokeStyle = "#3b4a49";
+  ctx.strokeStyle = palette.edge;
   ctx.lineWidth = 3;
   ctx.stroke(well);
 
   ctx.save();
   ctx.clip(well);
+  ctx.save();
+  if (chamber % 2) {
+    ctx.translate(WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.rotate(Math.PI);
+  }
   // Wiped glaze and grease are flat marks, never silhouettes of solid cover.
   fill(
     ctx,
@@ -205,7 +338,7 @@ export function createFeastFloor(
       `M 88 ${838 + offset} C 121 ${829 + offset} 168 ${850 + offset} 221 ${
         864 + offset
       }`,
-      "#525d5d",
+      palette.glaze,
       3
     );
   }
@@ -215,7 +348,7 @@ export function createFeastFloor(
       `M 61 ${733 + offset} C 92 ${735 + offset} 137 ${754 + offset} 185 ${
         783 + offset
       }`,
-      "#525d5d",
+      palette.glaze,
       4
     );
   }
@@ -234,6 +367,8 @@ export function createFeastFloor(
   ]) {
     line(ctx, `M ${x} ${y} l ${length} ${tilt}`, "#8990841a", 1.2);
   }
+  ctx.restore();
+  chamberWear(ctx, chamber);
 
   let seed = 7621 + chamber * 53;
   const random = () => {
@@ -353,6 +488,9 @@ export function createFeastFloor(
     fill(ctx, outline!, "#c9bea0", "#39453c", 1.5);
     line(ctx, fracture!, "#847c64", 1.2);
   }
-  for (const obstacle of obstacles) bread(ctx, obstacle);
+  for (const obstacle of obstacles) {
+    if (chamber === 3) ribs(ctx, obstacle);
+    else bread(ctx, obstacle, chamber === 4);
+  }
   return canvas;
 }

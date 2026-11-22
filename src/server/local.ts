@@ -67,4 +67,4 @@ const server = createServer(async (request, response) => {
 });
 
 server.on("error", (error) => console.error(error.message));
-server.listen(8787, "127.0.0.1", () => console.log("BODY HOP local API: http://127.0.0.1:8787"));
+server.listen(8787, "127.0.0.1", () => console.log("MOLT local API: http://127.0.0.1:8787"));

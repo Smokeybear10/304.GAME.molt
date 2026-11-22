@@ -7,10 +7,10 @@
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
     <meta name="theme-color" content="#211b1e" />
-    <title>BODY HOP</title>
+    <title>MOLT</title>
   </head>
-  <body>
-    <main id="app" aria-label="Body Hop game">
+  <body data-loading="true">
+    <main id="app" aria-label="Molt game">
       <header class="game-header">
         <div class="wordmark">
           <canvas
@@ -18,7 +18,7 @@
             width="510"
             height="108"
             role="img"
-            aria-label="BODY HOP"
+            aria-label="MOLT"
           ></canvas>
         </div>
         <div class="header-actions" role="group" aria-label="Game controls">
@@ -75,20 +75,20 @@
             </div>
           </div>
           <div class="body-group">
-            <span class="hud-label">BODY</span>
-            <span id="host-name">SPITTER</span>
+            <span class="hud-label">UPGRADES</span>
+            <span id="host-name">0 / 5</span>
           </div>
           <div class="chamber-group">
             <span class="hud-label">CHAMBER</span
             ><span id="chamber-value">01 / 06</span>
           </div>
-          <p id="health-note" class="health-note" role="status">Get close. Switch bodies. Recover 1 life.</p>
+          <p id="health-note" class="health-note" role="status">Space / Click to dash through bullets.</p>
         </div>
         <div class="stage-wrap">
           <div
             id="world"
             role="application"
-            aria-label="Move with WASD or arrows. Aim with the mouse. Left-click or press Space to attack. Hold to repeat Spit; press again for each Ram or Pounce. Right-click or press E to switch to the highlighted nearby body, even during an attack, and recover 1 life. You have 3 life. Enemies die in one hit. Clear the chamber, then leave through the opening above."
+            aria-label="Move with WASD or arrows. Aim with the mouse to auto-fire. Click or press Space to Dash through enemy bullets. You have 3 hearts. Clear the chamber to recover 1 heart and pick an upgrade."
           ></div>
           <div id="live-hint" aria-live="polite"></div>
           <div id="daily-foreshadow" hidden></div>
@@ -114,12 +114,8 @@
           </div>
           <p id="control-tip"></p>
           <div class="action-controls">
-            <button id="switch-button" class="switch-button" type="button" hidden>
-              <span>SWITCH <kbd>E</kbd></span>
-              <small id="switch-target"></small>
-            </button>
             <button id="ability-button" class="ability-button" type="button">
-              <span id="ability-name">SPIT</span
+              <span id="ability-name">DASH</span
               ><span id="ability-state" class="sr-only">Ready</span
               ><kbd>SPACE</kbd>
             </button>
@@ -131,7 +127,7 @@
         ><span id="save-status" role="status"></span>
       </footer>
       <noscript
-        >BODY HOP needs JavaScript to run its combat. Enable JavaScript and
+        >MOLT needs JavaScript to run its combat. Enable JavaScript and
         reload.</noscript
       >
     </main>

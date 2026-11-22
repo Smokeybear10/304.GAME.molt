@@ -6,7 +6,7 @@ const status = document.querySelector<HTMLElement>("#status")!;
 let launchTimer: ReturnType<typeof setTimeout> | null = null;
 const title = document.querySelector<HTMLCanvasElement>("#splash-title")!;
 const titleContext = title.getContext("2d");
-if (titleContext) paintTitle(titleContext, title.width, title.height);
+if (titleContext) paintTitle(titleContext, title.width, title.height, true);
 const cast = document.querySelector<HTMLCanvasElement>("#splash-cast")!;
 const castContext = cast.getContext("2d");
 if (castContext) {

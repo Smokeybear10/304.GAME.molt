@@ -17,7 +17,7 @@ import {
   PLAYER_BULLET_RADIUS,
   SPECIES,
 } from "../shared/content";
-import { canSwitchBody, getNearbyBody, getPlayer, previewSpecial } from "../shared/engine";
+import { getPlayer, previewSpecial } from "../shared/engine";
 import type { Actor, GameEvent, Run, Species, Vec2 } from "../shared/types";
 import type { GameInput } from "./input";
 import { createFeastFloor } from "./room-art";
@@ -49,6 +49,7 @@ type Ring = {
   life: number;
   max: number;
   color: number;
+  groundContact?: boolean;
 };
 type Contact = {
   x: number;
@@ -81,6 +82,17 @@ type Transfer = {
   departureHeight: number;
   departureAngle: number;
 };
+type DeathPose = {
+  image: Phaser.GameObjects.Image;
+  texture: string;
+  frame: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  angle: number;
+  at: number;
+};
 type SceneHooks = {
   getRun: () => Run;
   getInput: () => GameInput | null;
@@ -103,6 +115,7 @@ export class BodyHopScene extends Phaser.Scene {
   private foreground!: Phaser.GameObjects.Graphics;
   private grafts!: Phaser.GameObjects.Graphics;
   private keeperLabel!: Phaser.GameObjects.Text;
+  private cooldownLabel!: Phaser.GameObjects.Text;
   private keeperArrivalMs = 0;
   private canvasRendering = false;
   private simulationPoses = new Map<number, SimulationPose>();
@@ -113,6 +126,8 @@ export class BodyHopScene extends Phaser.Scene {
   private contacts: Contact[] = [];
   private aftermath: Aftermath[] = [];
   private corpseBirths = new Map<number, { angle: number; at: number }>();
+  private deathPoses = new Map<number, DeathPose>();
+  private arrivals = new Map<number, number>();
   private transfers: Transfer[] = [];
   private flashes = new Map<number, number>();
   private recoil = new Map<number, number>();
@@ -145,6 +160,8 @@ export class BodyHopScene extends Phaser.Scene {
   private elapsed = 0;
   private phaseStartedAt = 0;
   private visualPhase = "";
+  private exitOpen: boolean | null = null;
+  private exitOpeningMs = 0;
   private lastFrameTime: number | null = null;
   constructor(private hooks: SceneHooks) {
     super("body-hop");
@@ -157,7 +174,8 @@ export class BodyHopScene extends Phaser.Scene {
     for (let page = 0; page < 2; page++) {
       const atlas = document.createElement("canvas");
       atlas.width = columns * tile;
-      atlas.height = 19 * tile;
+      const frameCount = 4 * (speciesList.length * 2 + 1) * 10 + (page === 0 ? speciesList.length * 2 : 0);
+      atlas.height = Math.ceil(frameCount / columns) * tile;
       const ctx = atlas.getContext("2d");
       if (!ctx) throw new Error("Canvas rendering is unavailable");
       const names: string[] = [];
@@ -192,21 +210,20 @@ export class BodyHopScene extends Phaser.Scene {
                 )
               );
             }
-        for (const stage of [0, 1, 2] as const)
-          for (let frame = 0; frame < 10; frame++) {
-            const pose =
-              frame === 8 ? "brace" : frame === 9 ? "strike" : "walk";
-            add(
-              `keeper-${stage}-${frame < 8 ? frame : pose}-${direction}`,
-              createKeeperTexture(
-                (frame / 8) * Math.PI * 2,
-                stage,
-                tile,
-                pose,
-                direction
-              )
-            );
-          }
+        for (let frame = 0; frame < 10; frame++) {
+          const pose =
+            frame === 8 ? "brace" : frame === 9 ? "strike" : "walk";
+          add(
+            `keeper-0-${frame < 8 ? frame : pose}-${direction}`,
+            createKeeperTexture(
+              (frame / 8) * Math.PI * 2,
+              0,
+              tile,
+              pose,
+              direction
+            )
+          );
+        }
       }
       if (page === 0)
         for (const species of speciesList)
@@ -258,8 +275,39 @@ export class BodyHopScene extends Phaser.Scene {
         padding: { x: 10, y: 5 },
       })
       .setOrigin(0.5, 1)
-      .setDepth(2100)
+      .setDepth(3)
       .setVisible(false);
+    this.cooldownLabel = this.add
+      .text(0, 0, "", {
+        fontFamily: "Courier New",
+        fontStyle: "bold",
+        fontSize: "18px",
+        color: INK.paper,
+        stroke: INK.black,
+        strokeThickness: 4,
+        padding: { x: 2, y: 1 },
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(2101)
+      .setVisible(false);
+    const redraw = () => this.game.loop.wake();
+    this.scale.on(Phaser.Scale.Events.RESIZE, redraw);
+    const parent = this.game.canvas.parentElement;
+    const observer = new ResizeObserver((entries) => {
+      const bounds = entries[0]?.contentRect;
+      if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+      this.scale.getParentBounds();
+      this.scale.refresh();
+    });
+    if (parent) observer.observe(parent);
+    const cleanup = () => {
+      observer.disconnect();
+      this.scale.off(Phaser.Scale.Events.RESIZE, redraw);
+      this.events.off(Phaser.Scenes.Events.SHUTDOWN, cleanup);
+      this.events.off(Phaser.Scenes.Events.DESTROY, cleanup);
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, cleanup);
+    this.events.once(Phaser.Scenes.Events.DESTROY, cleanup);
     this.hooks.ready(this.game.canvas);
   }
   captureSimulationState(run: Run) {
@@ -321,6 +369,20 @@ export class BodyHopScene extends Phaser.Scene {
       this.simulationPoses.clear();
       this.phaseStartedAt = this.elapsed;
     }
+    this.syncEncounter(run);
+    this.draw(run, delta);
+    const settled =
+      run.phase === "ready" ||
+      run.phase === "reward" ||
+      run.phase === "paused" ||
+      ((run.phase === "dead" || run.phase === "escaped") &&
+        this.elapsed - this.phaseStartedAt > 700);
+    if (settled) {
+      this.lastFrameTime = null;
+      this.game.loop.sleep();
+    }
+  }
+  private syncEncounter(run: Run) {
     if (
       this.previousEncounter !== run.encounterIndex ||
       this.previousRun !== run.runId
@@ -339,17 +401,6 @@ export class BodyHopScene extends Phaser.Scene {
       this.previousEncounter = run.encounterIndex;
       this.previousRun = run.runId;
     }
-    this.draw(run, delta);
-    const settled =
-      run.phase === "ready" ||
-      run.phase === "reward" ||
-      run.phase === "paused" ||
-      ((run.phase === "dead" || run.phase === "escaped") &&
-        this.elapsed - this.phaseStartedAt > 700);
-    if (settled) {
-      this.lastFrameTime = null;
-      this.game.loop.sleep();
-    }
   }
   private resetVisuals() {
     this.simulationPoses.clear();
@@ -362,6 +413,9 @@ export class BodyHopScene extends Phaser.Scene {
     this.contacts = [];
     this.aftermath = [];
     this.corpseBirths.clear();
+    this.deathPoses.forEach((pose) => pose.image.destroy());
+    this.deathPoses.clear();
+    this.arrivals.clear();
     this.transfers.forEach((transfer) => transfer.departure?.destroy());
     this.transfers = [];
     this.keeperArrivalMs = 0;
@@ -373,23 +427,28 @@ export class BodyHopScene extends Phaser.Scene {
     this.mutationPulse.clear();
     this.bodyPoints.clear();
     this.gait.clear();
+    this.exitOpen = null;
+    this.exitOpeningMs = 0;
   }
   receive(events: GameEvent[]) {
+    this.syncEncounter(this.hooks.getRun());
     const departed = new Map<number, Vec2>();
     for (const event of events)
       if (event.type === "possess")
         departed.set(event.fromId, { x: event.fromX, y: event.fromY });
-    let fallen: { x: number; y: number; angle: number } | null = null;
+    let fallen: {
+      x: number;
+      y: number;
+      angle: number;
+      pose: Omit<DeathPose, "image"> | null;
+    } | null = null;
     for (const event of events) {
-      if (
-        event.type === "spawn" &&
-        event.ids.some((id) =>
-          this.hooks
-            .getRun()
-            .actors.some((actor) => actor.id === id && actor.elite)
-        )
-      )
-        this.keeperArrivalMs = 2400;
+      if (event.type === "spawn") {
+        for (const id of event.ids) this.arrivals.set(id, this.elapsed);
+        if (event.ids.some((id) =>
+          this.hooks.getRun().actors.some((actor) => actor.id === id && actor.elite)
+        )) this.keeperArrivalMs = 2400;
+      }
       if (event.type === "mutation")
         this.mutationPulse.set(event.mutationId, 500);
       if (event.type === "attack" && event.phase === "release") {
@@ -501,14 +560,31 @@ export class BodyHopScene extends Phaser.Scene {
           160
         );
         if (event.faction === "player" && !this.hooks.reducedMotion())
-          this.cameras.main.shake(80, event.coreDamage > 0 ? 0.003 : 0.0015);
+          this.cameras.main.shake(80, event.coreDamage > 0 ? 0.003 : 0.0015, true);
       }
       if (event.type === "death") {
+        const image = this.actorImages.get(event.id);
+        const reaction = this.hitReactions.get(event.id);
+        const texture = image?.texture.key.endsWith("-back") ? "creatures-back" : "creatures";
+        const frame = image ? String(image.frame.name) : "";
+        const pose = !event.player && image && !this.hooks.reducedMotion()
+          ? {
+              texture,
+              frame,
+              x: image.x,
+              y: image.y,
+              width: image.displayWidth,
+              height: image.displayHeight,
+              angle: reaction?.angle ?? 0,
+              at: this.elapsed,
+            }
+          : null;
         this.hitReactions.delete(event.id);
         fallen = {
           x: event.x,
           y: event.y,
           angle: this.gait.get(event.id)?.angle ?? 0,
+          pose,
         };
         this.leaveMark(
           event.x,
@@ -520,13 +596,28 @@ export class BodyHopScene extends Phaser.Scene {
         this.burst(event.x, event.y, 9, 0x8e6050, 130);
       }
       if (event.type === "corpse") {
-        const angle =
-          fallen && Math.hypot(event.x - fallen.x, event.y - fallen.y) < 2
-            ? fallen.angle
-            : 0;
+        const matching = fallen && Math.hypot(event.x - fallen.x, event.y - fallen.y) < 2
+          ? fallen : null;
+        const angle = matching?.angle ?? 0;
+        if (matching?.pose) {
+          const pose = matching.pose;
+          this.deathPoses.set(event.id, {
+            ...pose,
+            image: this.add.image(pose.x, pose.y, pose.texture, pose.frame)
+              .setDisplaySize(pose.width, pose.height)
+              .setDepth(10 + event.y),
+          });
+        }
         this.corpseBirths.set(event.id, { angle, at: this.elapsed });
+        fallen = null;
       }
       if (event.type === "possess") {
+        this.deathPoses.get(event.corpseId)?.image.destroy();
+        this.deathPoses.delete(event.corpseId);
+        this.corpseBirths.set(event.abandonedCorpseId, {
+          angle: this.gait.get(event.fromId)?.angle ?? 0,
+          at: this.elapsed,
+        });
         if (event.healed > 0) {
           this.rings.push({ x: event.x, y: event.y, radius: 42,
             life: 420, max: 420, color: 0xf0788e });
@@ -564,33 +655,41 @@ export class BodyHopScene extends Phaser.Scene {
         });
       }
       if (event.type === "impact") {
+        const solidHit = event.faction === "player" && event.hitCount > 0;
+        const enemy = event.faction === "enemy";
+        const echo = event.faction === "echo";
+        const life = solidHit ? 300 : echo ? 130 : 160;
         this.rings.push({
           x: event.x,
           y: event.y,
-          radius: event.radius,
-          life: 300,
-          max: 300,
-          color: LIGHT,
+          radius: solidHit ? event.radius : Math.min(event.radius, echo ? 16 : 20),
+          life,
+          max: life,
+          color: solidHit ? LIGHT : enemy ? 0xb88169 : echo ? 0x85858a : 0xb6b19a,
+          groundContact: !solidHit,
         });
+        if (!solidHit) continue;
         const angle = Math.atan2(event.dirY ?? 0, event.dirX ?? 1);
-        this.leaveMark(
-          event.x,
-          event.y,
-          angle,
-          event.radius * 0.85,
-          event.kind === "charge" ? "scar" : "remains"
-        );
-        this.contacts.push({
-          x: event.x,
-          y: event.y,
-          angle,
-          life: 230,
-          max: 230,
-          shell: true,
-          broken: true,
-          radial: event.kind !== "charge",
-        });
-        if (this.contacts.length > 32) this.contacts.shift();
+        if (event.kind !== "shock") {
+          this.leaveMark(
+            event.x,
+            event.y,
+            angle,
+            event.radius * 0.85,
+            event.kind === "charge" ? "scar" : "remains"
+          );
+          this.contacts.push({
+            x: event.x,
+            y: event.y,
+            angle,
+            life: 230,
+            max: 230,
+            shell: true,
+            broken: true,
+            radial: event.kind !== "charge",
+          });
+          if (this.contacts.length > 32) this.contacts.shift();
+        }
         this.burst(event.x, event.y, 7, 0xd7c89a, 150);
         if (!this.hooks.reducedMotion()) this.cameras.main.shake(75, 0.0015);
       }
@@ -724,6 +823,45 @@ export class BodyHopScene extends Phaser.Scene {
       }
     }
   }
+  private drawDeathPoses(run: Run) {
+    for (const [id, pose] of this.deathPoses) {
+      const age = this.elapsed - pose.at;
+      const corpse = run.corpses.find((body) => body.id === id);
+      if (age >= 120 || !corpse || corpse.spent || this.hooks.reducedMotion()) {
+        pose.image.destroy();
+        this.deathPoses.delete(id);
+        continue;
+      }
+      const progress = age / 120;
+      const settling = Phaser.Math.Clamp((age - 36) / 84, 0, 1);
+      const recoil = Math.sin(progress * Math.PI) * 5;
+      pose.image
+        .setPosition(
+          pose.x + (corpse.x - pose.x) * settling + Math.cos(pose.angle) * recoil,
+          pose.y + (corpse.y - pose.y) * settling + Math.sin(pose.angle) * recoil
+        )
+        .setDisplaySize(
+          pose.width * (1 + Math.sin(progress * Math.PI) * 0.12),
+          pose.height * (1 - progress * 0.24)
+        )
+        .setAlpha(1 - settling);
+      if (age < 36) {
+        if (this.canvasRendering)
+          pose.image.setTexture(
+            pose.texture.endsWith("-back") ? "creature-flash-back" : "creature-flash",
+            pose.frame
+          );
+        else pose.image.setTint(0xfff0ce).setTintMode(Phaser.TintModes.FILL);
+      } else {
+        pose.image.setTexture(pose.texture, pose.frame).clearTint();
+      }
+    }
+  }
+  private screenSize(worldSize: number, minimumPixels: number): number {
+    const { displaySize, gameSize } = this.scale;
+    const ratio = Math.min(displaySize.width / gameSize.width, displaySize.height / gameSize.height);
+    return Math.max(worldSize, minimumPixels / (ratio || 1));
+  }
   private draw(run: Run, dt: number) {
     const ground = this.ground,
       marks = this.marks,
@@ -734,14 +872,20 @@ export class BodyHopScene extends Phaser.Scene {
     marks.clear();
     front.clear();
     this.grafts.clear();
+    this.cooldownLabel.setVisible(false);
+    this.drawDeathPoses(run);
     this.drawAftermath();
     this.keeperArrivalMs = Math.max(0, this.keeperArrivalMs - dt);
     const keeper = actors.find((actor) => actor.elite && actor.hp > 0);
     this.keeperLabel.setVisible(Boolean(keeper && this.keeperArrivalMs > 0));
-    if (keeper)
+    if (keeper) {
+      const fontSize = Math.ceil(this.screenSize(20, 11));
+      if (this.keeperLabel.style.fontSize !== `${fontSize}px`)
+        this.keeperLabel.setFontSize(fontSize);
       this.keeperLabel
         .setPosition(keeper.x, Math.max(55, keeper.y - keeper.radius - 28))
         .setAlpha(Math.min(1, this.keeperArrivalMs / 350));
+    }
     for (const [id, remaining] of this.mutationPulse)
       this.mutationPulse.set(id, Math.max(0, remaining - dt));
     if (run.exit) {
@@ -750,7 +894,14 @@ export class BodyHopScene extends Phaser.Scene {
           run.phase === "cleared" ||
           run.phase === "escaped" ||
           (run.phase === "paused" && run.resumePhase === "cleared");
-      const gap = open ? 21 : 0;
+      if (this.exitOpen !== open) {
+        this.exitOpeningMs = this.exitOpen === false && open ? 240 : 0;
+        this.exitOpen = open;
+      } else if (run.phase !== "paused") {
+        this.exitOpeningMs = Math.max(0, this.exitOpeningMs - dt);
+      }
+      if (this.hooks.reducedMotion()) this.exitOpeningMs = 0;
+      const gap = open ? 21 * (1 - (this.exitOpeningMs / 240) ** 3) : 0;
       ground.fillStyle(0x151c1c, 1).fillEllipse(x, y - 9, 110, 74);
       ground
         .fillStyle(open ? 0x0f1215 : 0x303a35, 1)
@@ -831,18 +982,17 @@ export class BodyHopScene extends Phaser.Scene {
               3 + Math.sin(this.elapsed * 0.005 + i)
             );
       } else {
+        const presence = Math.min(1, area.remainingMs / 500);
         ground
-          .lineStyle(6, BLACK, 0.65)
+          .lineStyle(6, BLACK, 0.65 * presence)
           .lineBetween(area.x, area.y, area.toX, area.toY);
         ground
-          .lineStyle(3, LIGHT, 0.95)
+          .lineStyle(3, LIGHT, 0.95 * presence)
           .lineBetween(area.x, area.y, area.toX, area.toY);
       }
     }
     const input = this.hooks.getInput(),
       player = actors.find((actor) => actor.id === run.playerId)!;
-    const nearbyBody = getNearbyBody(run);
-    const switchReady = nearbyBody && canSwitchBody(run, nearbyBody.id);
     const aliveCorpses = new Set<number>();
     for (const corpse of run.corpses) {
       if (corpse.consumed) continue;
@@ -860,31 +1010,15 @@ export class BodyHopScene extends Phaser.Scene {
           .strokeEllipse(corpse.x, corpse.y + corpse.radius * 0.35,
             corpse.radius * 2.2, corpse.radius * 1.1);
       }
-      if (nearbyBody?.id === corpse.id) {
-        const pulse = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.006) * 2;
-        const reach = corpse.radius + 12 + pulse;
-        const color = switchReady ? 0xc5e5c8 : PAPER;
-        marks.lineStyle(4, BLACK, 0.8);
-        for (const width of [4, 2]) {
-          marks.lineStyle(width, width === 4 ? BLACK : color, switchReady ? 1 : 0.45);
-          for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-            const x = corpse.x + sx * reach, y = corpse.y + sy * reach * 0.6;
-            marks.lineBetween(x, y, x - sx * 10, y);
-            marks.lineBetween(x, y, x, y - sy * 8);
-          }
-        }
-        const gap = Math.hypot(corpse.x - player.x, corpse.y - player.y);
-        if (gap > 42) {
-          const steps = Math.ceil(gap / 16);
-          marks.fillStyle(color, switchReady ? 0.6 : 0.25);
-          for (let index = 1; index < steps; index++) {
-            const t = index / steps;
-            marks.fillCircle(player.x + (corpse.x - player.x) * t,
-              player.y + (corpse.y - player.y) * t, 1.3);
-          }
-        }
-      }
       const birth = this.corpseBirths.get(corpse.id);
+      const deathPose = this.deathPoses.get(corpse.id);
+      const corpsePresence = deathPose
+        ? Phaser.Math.Clamp((this.elapsed - deathPose.at - 36) / 84, 0, 1)
+        : 1;
+      if (!corpse.spent && birth && this.hooks.reducedMotion() && this.elapsed - birth.at < 120) {
+        marks.lineStyle(2, PAPER, 0.55)
+          .strokeEllipse(corpse.x, corpse.y, corpse.radius * 2, corpse.radius * 1.1);
+      }
       const settling =
         birth && !this.hooks.reducedMotion()
           ? Math.max(0, 1 - (this.elapsed - birth.at) / 240)
@@ -902,14 +1036,14 @@ export class BodyHopScene extends Phaser.Scene {
         .setRotation(birth?.angle ?? corpse.id * 0.7)
         .setAlpha(
           corpse.spent
-            ? (0.36 +
-                0.22 *
+            ? (0.26 +
+                0.32 *
                   Math.max(
                     0,
                     1 - (this.elapsed - (birth?.at ?? -Infinity)) / 1400
                   )) *
                 (leaving ? 1 - leaving.life / leaving.max : 1)
-            : 0.82
+            : 0.82 * corpsePresence
         );
     }
     this.corpseImages.forEach((image, id) => {
@@ -921,7 +1055,8 @@ export class BodyHopScene extends Phaser.Scene {
     for (const actor of actors)
       if (
         actor.hp > 0 &&
-        (actor.action?.stage === "windup" || actor.action?.kind === "leap")
+        (actor.action?.stage === "windup" || actor.action?.kind === "leap" ||
+          (actor.faction === "enemy" && actor.action?.kind === "charge"))
       )
         this.drawTelegraph(actor);
     if (
@@ -1029,14 +1164,8 @@ export class BodyHopScene extends Phaser.Scene {
         ? Math.min(1, 1 - (transfer.life - dt) / transfer.max)
         : 1;
       const entering = transfer && !this.hooks.reducedMotion() && !actor.action;
-      const keeperStage =
-        actor.hp <= actor.maxHp / 3
-          ? 2
-          : actor.hp <= (actor.maxHp * 2) / 3
-          ? 1
-          : 0;
       const key = actor.elite
-        ? `keeper-${keeperStage}-${pose}-${direction}`
+        ? `keeper-0-${pose}-${direction}`
         : entering && arrival < 100 / transfer.max
         ? `${actor.species}-brace-wild-${direction}`
         : `${actor.species}-${entering && arrival < 0.65 ? "strike" : pose}-${
@@ -1049,6 +1178,23 @@ export class BodyHopScene extends Phaser.Scene {
       let lift = 0,
         squashX = 1,
         squashY = 1;
+      const appearedAt = this.arrivals.get(actor.id);
+      if (appearedAt !== undefined) {
+        const progress = Math.min(1, (this.elapsed - appearedAt) / 480);
+        if (progress >= 1) this.arrivals.delete(actor.id);
+        else {
+          const remaining = 1 - progress;
+          const radius = actor.radius + 9 + (this.hooks.reducedMotion() ? 0 : progress * 18);
+          ground.fillStyle(BLACK, remaining * 0.45)
+            .fillEllipse(actor.x, actor.y + actor.radius * 0.4, radius * 2, radius);
+          marks.lineStyle(3, actor.faction === "enemy" ? DANGER : PAPER, remaining * 0.7)
+            .strokeEllipse(actor.x, actor.y + actor.radius * 0.4, radius * 2, radius);
+          if (!this.hooks.reducedMotion() && !actor.action) {
+            squashX *= 1 + remaining * 0.18;
+            squashY *= 1 - remaining * 0.24;
+          }
+        }
+      }
       if (actor.action) {
         const progress =
           actor.action.timeMs / Math.max(1, actor.action.durationMs);
@@ -1118,18 +1264,39 @@ export class BodyHopScene extends Phaser.Scene {
           ? Math.min(1, (this.elapsed - this.phaseStartedAt) / 350)
           : 0;
       const presence = 1 - escaping;
-      lift += escaping * 55;
+      if (escaping > 0 && !this.hooks.reducedMotion()) {
+        const enteringExit = 1 - (1 - escaping) ** 2;
+        visual.x += (run.exit.x - visual.x) * enteringExit;
+        visual.y += (run.exit.y - 3 - visual.y) * enteringExit;
+        lift *= 1 - enteringExit;
+        squashX *= 1 - enteringExit * 0.45;
+        squashY *= 1 - enteringExit * 0.45;
+      }
       const anchor = creatureAnchor(actor.species, direction),
         unit = size / 112;
       this.bodyPoints.set(actor.id, {
         x: visual.x + anchor.x * squashX * unit,
         y: visual.y - lift + anchor.y * squashY * unit,
       });
+      if (actor.faction === "player" && actor.action?.kind === "dash") {
+        marks
+          .lineStyle(3, 0xc5e5c8, 0.85)
+          .strokeCircle(visual.x, visual.y, actor.radius + 7);
+      }
+      if (actor.faction === "enemy" && actor.maxHp > 1) {
+        const barW = 74;
+        const barH = 7;
+        const barX = visual.x - barW / 2;
+        const barY = visual.y - actor.radius - 22;
+        marks.fillStyle(BLACK, 0.78).fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+        marks.fillStyle(0x453534, 1).fillRect(barX, barY, barW, barH);
+        marks.fillStyle(RED, 1).fillRect(barX, barY, barW * Math.max(0, actor.hp / actor.maxHp), barH);
+      }
       ground
         .fillStyle(BLACK, (echo ? 0.05 : 0.16) * presence)
         .fillEllipse(
-          actor.x + 4,
-          actor.y + actor.radius * 0.7,
+          (escaping > 0 ? visual.x : actor.x) + 4,
+          (escaping > 0 ? visual.y : actor.y) + actor.radius * 0.7,
           actor.radius * 2.3 - lift * 0.25,
           actor.radius * 0.75 - lift * 0.06
         );
@@ -1146,7 +1313,7 @@ export class BodyHopScene extends Phaser.Scene {
             : actor.invulnerableMs > 0 && !transfer
             ? this.hooks.reducedMotion()
               ? 0.85
-              : 0.7 + Math.sin(this.elapsed * 0.025) * 0.15
+              : 0.925 + Math.sin(this.elapsed * 0.025) * 0.075
             : 1
         );
       const flash = this.flashes.get(actor.id) ?? 0;
@@ -1168,23 +1335,25 @@ export class BodyHopScene extends Phaser.Scene {
           .strokeCircle(actor.x, actor.y, actor.radius + 3);
       }
       if (owned) {
-        this.drawAbilityMeter(actor, visual, lift, presence);
-        marks
-          .lineStyle(2.4, BLACK, 0.7 * presence)
-          .strokeEllipse(
-            actor.x,
-            actor.y + actor.radius * 0.6,
-            actor.radius * 2.65,
-            actor.radius * 0.9
-          );
-        marks
-          .lineStyle(1.2, LIGHT, presence)
-          .strokeEllipse(
-            actor.x,
-            actor.y + actor.radius * 0.6,
-            actor.radius * 2.65 + 3,
-            actor.radius * 0.9 + 3
-          );
+        if (run.phase !== "escaped") {
+          this.drawAbilityMeter(actor, visual, lift, presence);
+          marks
+            .lineStyle(this.screenSize(2.4, 2.1), BLACK, 0.7 * presence)
+            .strokeEllipse(
+              actor.x,
+              actor.y + actor.radius * 0.6,
+              actor.radius * 2.65 + 3,
+              actor.radius * 0.9 + 3
+            );
+          marks
+            .lineStyle(this.screenSize(1.2, 1.1), LIGHT, presence)
+            .strokeEllipse(
+              actor.x,
+              actor.y + actor.radius * 0.6,
+              actor.radius * 2.65 + 3,
+              actor.radius * 0.9 + 3
+            );
+        }
         this.grafts.setDepth(10 + actor.y + 0.5).setAlpha(presence);
         if (!entering || arrival >= 100 / transfer.max)
           this.drawMorphology(
@@ -1239,9 +1408,15 @@ export class BodyHopScene extends Phaser.Scene {
         this.actorImages.delete(id);
         this.hitReactions.delete(id);
         this.gait.delete(id);
+        this.arrivals.delete(id);
       }
     });
-    for (const current of run.projectiles) {
+    this.drawEffects(dt);
+    const projectiles = [
+      ...run.projectiles.filter(shot => shot.faction === "player"),
+      ...run.projectiles.filter(shot => shot.faction === "enemy"),
+    ];
+    for (const current of projectiles) {
       const projectile = {
         ...current,
         x: current.prevX + (current.x - current.prevX) * alpha,
@@ -1299,10 +1474,7 @@ export class BodyHopScene extends Phaser.Scene {
           .fillCircle(projectile.x - 1, projectile.y - 2, 1.4);
       }
     }
-    this.drawEffects(dt);
-    const underFire = run.projectiles.some((shot) => shot.faction === "enemy") ||
-      actors.some((actor) => actor.faction === "enemy" && actor.action?.pattern);
-    if (player.hp > 0 && underFire && run.phase === "playing" &&
+    if (player.hp > 0 && run.phase === "playing" &&
       !(player.action?.kind === "leap" && player.action.stage === "active")) {
       const protectedBody = player.invulnerableMs > 0;
       front.lineStyle(4, BLACK, 0.95).strokeCircle(player.x, player.y, PLAYER_BULLET_RADIUS);
@@ -1354,6 +1526,24 @@ export class BodyHopScene extends Phaser.Scene {
         actor.action ? 3 : 2
       );
     }
+    const feedback = this.hooks.getInput()?.cooldownFeedback;
+    if (feedback) {
+      const label = this.cooldownLabel;
+      const fontSize = Math.ceil(this.screenSize(18, 12));
+      if (label.style.fontSize !== `${fontSize}px`) label.setFontSize(fontSize);
+      label.setText(`${(Math.ceil(feedback.cooldownMs / 100) / 10).toFixed(1)}s`);
+      const gap = this.screenSize(7, 4), margin = this.screenSize(8, 4);
+      const right = x + radius + gap;
+      const labelX = right + label.width <= WORLD_WIDTH - margin
+        ? right : x - radius - gap - label.width;
+      label
+        .setPosition(
+          Phaser.Math.Clamp(labelX, margin, WORLD_WIDTH - label.width - margin),
+          Phaser.Math.Clamp(y, label.height / 2 + margin, WORLD_HEIGHT - label.height / 2 - margin)
+        )
+        .setAlpha(presence * (this.hooks.reducedMotion() ? 1 : Math.min(1, feedback.expiresInMs / 100)))
+        .setVisible(true);
+    }
   }
   private dashedCircle(
     g: Phaser.GameObjects.Graphics,
@@ -1370,11 +1560,24 @@ export class BodyHopScene extends Phaser.Scene {
       g.strokePath();
     }
   }
+  private strokeTelegraph(enemy: boolean, opacity: number, trace: () => void, width = 2) {
+    if (enemy) {
+      this.marks.lineStyle(this.screenSize(width + 2, 2.5), BLACK, 0.7);
+      trace();
+      this.marks.strokePath();
+    }
+    this.marks.lineStyle(enemy ? this.screenSize(width, 1.25) : width,
+      enemy ? DANGER : LIGHT, opacity);
+    // WebGL stores widths with path points, so each stroke needs its own trace.
+    trace();
+    this.marks.strokePath();
+  }
   private drawTelegraph(actor: Actor) {
     const action = actor.action;
     if (!action) return;
     const g = this.marks,
-      color = actor.faction === "enemy" ? DANGER : LIGHT;
+      enemy = actor.faction === "enemy",
+      color = enemy ? DANGER : LIGHT;
     const progress =
       action.stage === "active"
         ? 1
@@ -1388,9 +1591,8 @@ export class BodyHopScene extends Phaser.Scene {
       const sweep = pattern.kind === "ring"
         ? Math.PI * 2 - pattern.gap
         : pattern.spread;
-      g.lineStyle(2, color, 0.4 + progress * 0.5).beginPath();
-      g.arc(actor.x, actor.y, reach, start, start + sweep);
-      g.strokePath();
+      this.strokeTelegraph(enemy, 0.4 + progress * 0.5,
+        () => g.beginPath().arc(actor.x, actor.y, reach, start, start + sweep));
       for (let index = 0; index < pattern.count; index++) {
         const angle = pattern.kind === "ring"
           ? pattern.angle + Math.PI * 2 * index / pattern.count
@@ -1401,7 +1603,7 @@ export class BodyHopScene extends Phaser.Scene {
         if (pattern.kind === "ring" && difference < pattern.gap / 2) continue;
         const dx = Math.cos(angle), dy = Math.sin(angle);
         const from = actor.radius + 14;
-        g.lineStyle(1.4, color, 0.14 + progress * 0.28)
+        g.lineStyle(enemy ? this.screenSize(1.4, 0.75) : 1.4, color, 0.14 + progress * 0.28)
           .lineBetween(actor.x + dx * from, actor.y + dy * from,
             actor.x + dx * reach, actor.y + dy * reach);
         const tip = from + (reach - from) * progress;
@@ -1416,11 +1618,8 @@ export class BodyHopScene extends Phaser.Scene {
         action.targetY,
         radius
       );
-      g.lineStyle(2, color, 0.6 + progress * 0.4).strokeCircle(
-        action.targetX,
-        action.targetY,
-        radius
-      );
+      this.strokeTelegraph(enemy, 0.6 + progress * 0.4,
+        () => g.beginPath().arc(action.targetX, action.targetY, radius, 0, Math.PI * 2));
       g.lineStyle(1, color, 0.3).lineBetween(
         actor.x,
         actor.y,
@@ -1431,13 +1630,11 @@ export class BodyHopScene extends Phaser.Scene {
       const angle = Math.atan2(action.dirY, action.dirX),
         reach = actor.species === "beetle" ? 100 : 84;
       g.fillStyle(color, 0.06 + progress * 0.13);
-      g.lineStyle(2, color, 0.5 + progress * 0.4);
-      g.beginPath();
-      g.moveTo(actor.x, actor.y);
-      g.arc(actor.x, actor.y, reach, angle - 1.3, angle + 1.3);
-      g.closePath();
+      const trace = () => g.beginPath().moveTo(actor.x, actor.y)
+        .arc(actor.x, actor.y, reach, angle - 1.3, angle + 1.3).closePath();
+      trace();
       g.fillPath();
-      g.strokePath();
+      this.strokeTelegraph(enemy, 0.5 + progress * 0.4, trace);
       g.lineStyle(3, color, 0.8).lineBetween(
         actor.x + action.dirX * (actor.radius + 8),
         actor.y + action.dirY * (actor.radius + 8),
@@ -1446,17 +1643,18 @@ export class BodyHopScene extends Phaser.Scene {
       );
     } else if (action.kind === "charge") {
       const px = -action.dirY * actor.radius,
-        py = action.dirX * actor.radius;
+        py = action.dirX * actor.radius,
+        angle = Math.atan2(action.dirY, action.dirX);
       g.fillStyle(color, 0.07 + progress * 0.1);
-      g.lineStyle(2, color, 0.5 + progress * 0.35);
-      g.beginPath();
-      g.moveTo(actor.x + px, actor.y + py);
-      g.lineTo(action.targetX + px, action.targetY + py);
-      g.lineTo(action.targetX - px, action.targetY - py);
-      g.lineTo(actor.x - px, actor.y - py);
-      g.closePath();
+      const trace = () => g.beginPath().moveTo(actor.x + px, actor.y + py)
+        .lineTo(action.targetX + px, action.targetY + py)
+        .arc(action.targetX, action.targetY, actor.radius, angle + Math.PI / 2, angle - Math.PI / 2, true)
+        .lineTo(actor.x - px, actor.y - py)
+        .arc(actor.x, actor.y, actor.radius, angle - Math.PI / 2, angle + Math.PI / 2, true)
+        .closePath();
+      trace();
       g.fillPath();
-      g.strokePath();
+      this.strokeTelegraph(enemy, 0.5 + progress * 0.35, trace);
       const x = actor.x + (action.targetX - actor.x) * progress,
         y = actor.y + (action.targetY - actor.y) * progress;
       g.lineStyle(3, color, 0.8).lineBetween(actor.x, actor.y, x, y);
@@ -1475,7 +1673,8 @@ export class BodyHopScene extends Phaser.Scene {
         x - px,
         y - py
       );
-      g.lineStyle(1.7, color, 0.6).lineBetween(actor.x, actor.y, x, y);
+      this.strokeTelegraph(enemy, 0.6,
+        () => g.beginPath().moveTo(actor.x, actor.y).lineTo(x, y), 1.7);
     }
   }
   private drawAim(run: Run, actor: Actor, aim: Vec2, aimDistance?: number) {
@@ -1550,12 +1749,21 @@ export class BodyHopScene extends Phaser.Scene {
     };
     drawMutationGrafts(
       g,
-      run.mutations,
+      run.mutations.filter((id) => id !== "silk-trail"),
       point,
       scale,
       this.mutationPulse,
-      this.elapsed
+      this.hooks.reducedMotion() ? 0 : this.elapsed
     );
+    if (run.silkTrail) {
+      const presence = Math.min(1, run.silkTrail.remainingMs / 300);
+      const sway = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.006) * 6;
+      const root = point(-24, 0), tip = point(-44, sway);
+      g.lineStyle(4, BLACK, 0.8 * presence)
+        .lineBetween(root.x, root.y, tip.x, tip.y);
+      g.lineStyle(2, LIGHT, presence)
+        .lineBetween(root.x, root.y, tip.x, tip.y);
+    }
     if (run.healthModel === "shell-core" && actor.shell < actor.maxShell) {
       const damage = 1 - actor.shell / actor.maxShell;
       const cuts = [
@@ -1648,16 +1856,19 @@ export class BodyHopScene extends Phaser.Scene {
     this.rings = this.rings.filter((r) => r.life > 0);
     for (const ring of this.rings) {
       ring.life -= dt;
-      const progress = 1 - ring.life / ring.max;
+      const progress = 1 - Math.max(0, ring.life) / ring.max;
+      const spread = ring.groundContact
+        ? this.hooks.reducedMotion() ? 1 : 0.7 + progress * 0.3
+        : progress;
       g.lineStyle(
-        2.6 * (1 - progress),
+        (ring.groundContact ? 1.6 : 2.6) * (1 - progress),
         ring.color,
-        Math.max(0, 1 - progress)
+        Math.max(0, 1 - progress) * (ring.groundContact ? 0.65 : 1)
       ).strokeEllipse(
         ring.x,
         ring.y,
-        ring.radius * 2 * progress,
-        ring.radius * 1.6 * progress
+        ring.radius * 2 * spread,
+        ring.radius * (ring.groundContact ? 0.65 : 1.6) * spread
       );
     }
     this.transfers.forEach((transfer) => {

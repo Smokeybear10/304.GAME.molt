@@ -1,8 +1,8 @@
 import { CheckpointSchema } from './types.ts';
 import type { Actor, BulletPattern, Checkpoint, Challenge, Corpse, GameEvent, HealthModel, InputFrame, MutationId, Rect, Run, RunResult, Species, Vec2 } from './types.ts';
-import { BODY_SWITCH_COOLDOWN_MS, BODY_SWITCH_RANGE, CHARGE_DURATION_MS, CHARGE_SPEED, CONTENT_VERSION, ENCOUNTER_COUNT, EXIT_RADIUS, LEAP_DISTANCE, LEAP_RADIUS, MAX_ENEMY_PROJECTILES, MAX_PROJECTILES, PLAYER_BULLET_RADIUS, POSSESSION_CLEAR_RADIUS, SPECIES, TICK_MS, WORLD_HEIGHT, WORLD_WIDTH, getEncounter, getRewardOffers } from './content.ts';
+import { BODY_SWITCH_COOLDOWN_MS, BOSS_HP, CHARGE_DURATION_MS, CHARGE_SPEED, CONTENT_VERSION, DASH_COOLDOWN_MS, DASH_DURATION_MS, DASH_INVULNERABLE_MS, DASH_SPEED, ENCOUNTER_COUNT, ENEMY_WALK_SPEED_SCALE, EXIT_RADIUS, LEAP_DISTANCE, LEAP_RADIUS, MAX_ENEMY_PROJECTILES, MAX_PROJECTILES, PLAYER_BULLET_RADIUS, PLAYER_LEAP_BASE_MS, PLAYER_LEAP_RANGE_MS, PLAYER_MELEE_WINDUP_MS, PLAYER_SPIT_SPEED, PLAYER_SPIT_WINDUP_MS, POSSESSION_CLEAR_RADIUS, SPECIES, TICK_MS, WORLD_HEIGHT, WORLD_WIDTH, getEncounter, getRewardOffers } from './content.ts';
 
-export const EMPTY_INPUT: InputFrame = { moveX: 0, moveY: 0, aimX: 0, aimY: -1, attackHeld: false, abilityPressed: false, assistedBasic: true, hopHeld: false, hopCommitId: null, hopCancelled: false };
+export const EMPTY_INPUT: InputFrame = { moveX: 0, moveY: 0, aimX: 0, aimY: -1, attackHeld: false, abilityPressed: false, assistedBasic: true, hopHeld: false, hopCommitId: null, hopCancelled: false, dashPressed: false };
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const distance = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
 const direction = (x: number, y: number): Vec2 => {
@@ -38,8 +38,8 @@ function crossesRect(start: Vec2, end: Vec2, rect: Rect, padding = 0): boolean {
   return true;
 }
 
-export function hasLineOfSight(run: Run, from: Vec2, to: Vec2): boolean {
-  return !run.obstacles.some(rect => crossesRect(from, to, rect));
+export function hasLineOfSight(run: Run, from: Vec2, to: Vec2, padding = 0): boolean {
+  return !run.obstacles.some(rect => crossesRect(from, to, rect, padding));
 }
 
 function rayRectDistance(from: Vec2, aim: Vec2, rect: Rect): number {
@@ -188,13 +188,14 @@ function moveActor(run: Run, actor: Actor, dx: number, dy: number): void {
 }
 
 function displace(run: Run, actor: Actor, dx: number, dy: number): void {
+  actor.navigation = null;
   const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 12));
   for (let index = 0; index < steps; index += 1) moveActor(run, actor, dx / steps, dy / steps);
 }
 
 function makeActor(run: Run, species: Species, faction: Actor['faction'], x: number, y: number, elite = false): Actor {
   const definition = SPECIES[species];
-  const hp = faction === 'enemy' ? definition.enemyHp : run.core;
+  const hp = faction === 'enemy' ? (elite ? BOSS_HP : definition.enemyHp) : run.core;
   const point = fitPosition(run, x, y, definition.radius * (elite ? 1.2 : 1));
   return {
     id: run.nextEntityId++, species, faction, ...point, radius: definition.radius * (elite ? 1.2 : 1), hp, maxHp: faction === 'enemy' ? hp : run.maxCore,
@@ -202,7 +203,7 @@ function makeActor(run: Run, species: Species, faction: Actor['faction'], x: num
     facingX: 0, facingY: faction === 'enemy' ? 1 : -1,
     basicCooldownMs: faction === 'enemy' ? 700 : 0, specialCooldownMs: faction === 'enemy' ? 1100 + run.nextEntityId % 4 * 180 : 0,
     invulnerableMs: 0, stunMs: 0, poisonMs: 0, poisonTickMs: 0, poisonOwnerId: 0,
-    action: null, lastSpecial: null, elite, volleyCount: 0,
+    action: null, lastSpecial: null, elite, volleyCount: 0, navigation: null,
   };
 }
 
@@ -217,6 +218,7 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   run.corpses = [];
   run.projectiles = [];
   run.areas = [];
+  run.silkTrail = null;
   run.encounterTimeMs = 0;
   run.encounterGroup = 0;
   run.hopCooldownMs = 0;
@@ -249,7 +251,7 @@ function captureBoundary(run: Run): Checkpoint {
     schemaVersion: 2, challengeId: run.challenge.id, contentVersion: run.challenge.contentVersion, runId: run.runId, healthModel: 'shared',
     encounterIndex: run.encounterIndex, boundary: run.phase === 'reward' ? 'reward' : run.phase === 'cleared' ? 'cleared' : 'encounter-start',
     core: run.core, maxCore: 3, hopCooldownMs: run.hopCooldownMs,
-    host: { species: player.species, shell: 0, specialCooldownMs: player.specialCooldownMs, basicCooldownMs: player.basicCooldownMs, lastSpecial: player.lastSpecial ? { ...player.lastSpecial } : null, position: { x: player.x, y: player.y } },
+    host: { species: player.species, shell: 0, specialCooldownMs: player.specialCooldownMs, basicCooldownMs: player.basicCooldownMs, lastSpecial: player.lastSpecial ? { ...player.lastSpecial } : null, position: fitPosition(run, player.x, player.y, player.radius) },
     clearedCorpses: run.phase === 'cleared' ? run.corpses.map(corpse => ({ ...corpse })) : [],
     mutations: [...run.mutations], rewardOffers: [...run.rewardOffers], completedEncounters: run.completedEncounters,
     activeTimeMs: run.activeTimeMs, lineage: run.lineage.map(entry => ({ ...entry })), counters: { ...run.counters }, nextEntityId: run.nextEntityId,
@@ -266,7 +268,7 @@ export function createRun(challenge: Challenge, _healthModel: HealthModel = 'sha
   const maxCore = 3;
   const run: Run = {
     challenge: { ...challenge }, runId, healthModel: 'shared', phase: 'ready', resumePhase: 'ready', encounterIndex: 0, completedEncounters: 0,
-    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], obstacles: [], mutations: [], rewardOffers: [],
+    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], silkTrail: null, obstacles: [], mutations: [], rewardOffers: [],
     activeTimeMs: 0, encounterTimeMs: 0, lineage: [{ species: 'spitter', encounterIndex: 0, atMs: 0 }], encounterRecords: [],
     counters: { kills: 0, hops: 0, specials: 0, damageTaken: 0 }, nextEntityId: 1, hopCooldownMs: 0, lossCause: '', boundaryCheckpoint: null, encounterGroup: 0, exit: { x: WORLD_WIDTH / 2, y: 72 },
   };
@@ -313,8 +315,11 @@ export function restoreCheckpoint(value: unknown, challenge: Challenge): Run | n
 }
 
 export function startEncounter(run: Run): GameEvent[] {
-  if (run.phase === 'ready') { run.phase = 'playing'; run.resumePhase = 'playing'; }
-  return [];
+  if (run.phase !== 'ready') return [];
+  run.phase = 'playing';
+  run.resumePhase = 'playing';
+  return [{ type: 'spawn', ids: run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0).map(actor => actor.id),
+    group: run.encounterGroup, totalGroups: getEncounter(run.challenge, run.encounterIndex).groups.length }];
 }
 export function pause(run: Run): void {
   if (run.phase !== 'ready' && run.phase !== 'playing' && run.phase !== 'cleared' && run.phase !== 'reward') return;
@@ -334,7 +339,7 @@ function advanceEncounter(run: Run): void {
 }
 export function chooseMutation(run: Run, offerId: MutationId, replaceSlot: 0 | 1 | null = null): GameEvent[] {
   if (run.phase !== 'reward' || !run.rewardOffers.includes(offerId) || run.mutations.includes(offerId)) return [];
-  if (run.mutations.length < 2) run.mutations.push(offerId);
+  if (run.mutations.length < 5) run.mutations.push(offerId);
   else if (replaceSlot === 0 || replaceSlot === 1) run.mutations[replaceSlot] = offerId;
   else return [];
   const player = getPlayer(run);
@@ -353,21 +358,16 @@ export function createResult(run: Run): RunResult | null {
     lineage: run.lineage.map(entry => ({ ...entry })), encounterRecords: run.encounterRecords.map(record => ({ ...record, entryMutations: [...record.entryMutations] })), counters: { ...run.counters }, cause: run.phase === 'escaped' ? 'Escaped the keeper.' : run.lossCause };
 }
 
-function nearbyBodies(run: Run): Corpse[] {
-  if (run.phase !== 'playing' && run.phase !== 'cleared') return [];
-  const player = getPlayer(run);
-  return run.corpses.filter(corpse => !corpse.spent && !corpse.consumed && distance(player, corpse) <= BODY_SWITCH_RANGE && hasLineOfSight(run, player, corpse))
-    .sort((a, b) => distance(player, a) - distance(player, b) || a.id - b.id);
+function nearbyBodies(_run: Run): Corpse[] {
+  return [];
 }
 
-export function getNearbyBody(run: Run): Corpse | null {
-  return nearbyBodies(run)[0] ?? null;
+export function getNearbyBody(_run: Run): Corpse | null {
+  return null;
 }
 
-export function canSwitchBody(run: Run, corpseId: number): boolean {
-  if (run.phase !== 'playing' && run.phase !== 'cleared') return false;
-  const player = getPlayer(run);
-  return run.core > 0 && player.hp > 0 && player.stunMs <= 0 && run.hopCooldownMs <= 0 && nearbyBodies(run).some(corpse => corpse.id === corpseId);
+export function canSwitchBody(_run: Run, _corpseId: number): boolean {
+  return false;
 }
 
 function canTakeDamage(target: Actor): boolean {
@@ -379,6 +379,7 @@ function damage(run: Run, target: Actor, amount: number, sourceId: number, gener
   let shellDamage = 0;
   let coreDamage = 0;
   if (target.faction === 'player') {
+    if (!run.actors.some(actor => actor.faction === 'enemy' && actor.hp > 0) && run.encounterGroup === getEncounter(run.challenge, run.encounterIndex).groups.length - 1) return false;
     amount = 1;
     target.shell = 0;
     coreDamage = Math.min(run.core, amount);
@@ -394,11 +395,8 @@ function damage(run: Run, target: Actor, amount: number, sourceId: number, gener
   events.push({ type: 'damage', targetId: target.id, x: target.x, y: target.y, amount, shellDamage, coreDamage, shellBroken: shellDamage > 0 && target.shell === 0, sourceId, faction: target.faction });
   if (target.hp > 0) return true;
   events.push({ type: 'death', id: target.id, x: target.x, y: target.y, species: target.species, player: target.faction === 'player' });
-  if (target.faction === 'player') { recordCombatEnd(run, 'failed'); run.phase = 'dead'; run.lossCause = cause; return true; }
+  if (target.faction === 'player') { recordCombatEnd(run, 'failed'); run.phase = 'dead'; run.silkTrail = null; run.lossCause = cause; return true; }
   run.counters.kills += 1;
-  const corpse = { id: run.nextEntityId++, species: target.species, x: target.x, y: target.y, radius: SPECIES[target.species].radius, spent: false, elite: target.elite };
-  run.corpses.push(corpse);
-  events.push({ type: 'corpse', id: corpse.id, x: corpse.x, y: corpse.y, species: corpse.species });
   if (generation === 0 && has(run, 'grave-bloom') && run.areas.length < 32) {
     run.areas.push({ id: run.nextEntityId++, ownerId: sourceId, kind: 'acid', x: target.x, y: target.y, toX: target.x, toY: target.y, radius: 75, remainingMs: 2600, tickMs: 0, hitIds: [] });
     events.push({ type: 'mutation', mutationId: 'grave-bloom', x: target.x, y: target.y });
@@ -406,15 +404,16 @@ function damage(run: Run, target: Actor, amount: number, sourceId: number, gener
   return true;
 }
 
-function projectile(run: Run, actor: Actor, dx: number, dy: number, amount: number, generation: 0 | 1, special: boolean, kind: 'spit' | 'barb' = 'spit', patternSpeed?: number): void {
+function projectile(run: Run, actor: Actor, dx: number, dy: number, amount: number, generation: 0 | 1, _special: boolean, kind: 'spit' | 'barb' = 'spit', patternSpeed?: number): void {
   if (run.projectiles.length >= MAX_PROJECTILES) return;
   if (actor.faction === 'enemy' && run.projectiles.filter(shot => shot.faction === 'enemy').length >= MAX_ENEMY_PROJECTILES) return;
-  const speed = patternSpeed ?? (actor.faction === 'enemy' ? 260 : 530);
+  const isPlayer = actor.faction !== 'enemy';
+  const speed = patternSpeed ?? (isPlayer ? PLAYER_SPIT_SPEED * (has(run, 'echo-tissue') ? 1.22 : 1) : 260);
   const x = actor.x + dx * (actor.radius + 7);
   const y = actor.y + dy * (actor.radius + 7);
-  run.projectiles.push({ id: run.nextEntityId++, ownerId: actor.id, faction: actor.faction === 'enemy' ? 'enemy' : 'player', x, y, prevX: x, prevY: y,
-    vx: dx * speed, vy: dy * speed, radius: kind === 'barb' ? 6 : 8, damage: amount, lifeMs: actor.faction === 'enemy' ? 3400 : 2000, kind, generation,
-    poison: special && generation === 0 && actor.faction !== 'enemy' && has(run, 'venom-sacs') });
+  run.projectiles.push({ id: run.nextEntityId++, ownerId: actor.id, faction: isPlayer ? 'player' : 'enemy', x, y, prevX: x, prevY: y,
+    vx: dx * speed, vy: dy * speed, radius: kind === 'barb' ? 6 : 8, damage: amount, lifeMs: isPlayer ? 2000 : 3400, kind, generation,
+    poison: false, bounces: isPlayer && has(run, 'silk-trail') ? 1 : 0 });
 }
 
 function enemyPattern(run: Run, actor: Actor, dx: number, dy: number, basic = false): BulletPattern {
@@ -431,20 +430,30 @@ function enemyPattern(run: Run, actor: Actor, dx: number, dy: number, basic = fa
 
 function emitPattern(run: Run, actor: Actor, pattern: BulletPattern): void {
   const player = getPlayer(run);
-  const close = distance(actor, player) < 160;
-  const closeAngle = Math.atan2(player.y - actor.y, player.x - actor.x);
+  const clearance = PLAYER_BULLET_RADIUS + (actor.elite ? 6 : 8) + 6;
+  const muzzleDistance = actor.radius + 7;
+  const safetyDistance = muzzleDistance + pattern.speed * 0.22;
   const angularDistance = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
   for (let index = 0; index < pattern.count; index++) {
     const angle = pattern.kind === 'ring' ? pattern.angle + index * Math.PI * 2 / pattern.count
       : pattern.angle + (index / (pattern.count - 1) - 0.5) * pattern.spread;
     if (pattern.kind === 'ring' && angularDistance(angle, pattern.angle) < pattern.gap / 2) continue;
-    if (close && angularDistance(angle, closeAngle) < 0.675) continue;
-    projectile(run, actor, Math.cos(angle), Math.sin(angle), 1, 0, true, actor.elite ? 'barb' : 'spit', pattern.speed);
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const muzzle = { x: actor.x + dx * muzzleDistance, y: actor.y + dy * muzzleDistance };
+    const safetyEnd = { x: actor.x + dx * safetyDistance, y: actor.y + dy * safetyDistance };
+    if (segmentDistance(player, muzzle, safetyEnd) <= clearance) continue;
+    projectile(run, actor, dx, dy, 1, 0, true, actor.elite ? 'barb' : 'spit', pattern.speed);
   }
 }
 
 function fan(run: Run, actor: Actor, dx: number, dy: number, generation: 0 | 1): void {
-  projectile(run, actor, dx, dy, 3, generation, true);
+  const baseAngle = Math.atan2(dy, dx);
+  const angles = actor.faction === 'player' && has(run, 'split-glands')
+    ? [baseAngle - 0.2, baseAngle, baseAngle + 0.2]
+    : [baseAngle];
+  for (const angle of angles) {
+    projectile(run, actor, Math.cos(angle), Math.sin(angle), 1, generation, true);
+  }
 }
 
 function targets(run: Run, actor: Actor): Actor[] {
@@ -455,6 +464,7 @@ function targets(run: Run, actor: Actor): Actor[] {
 function basicAttack(run: Run, actor: Actor, dx: number, dy: number, events: GameEvent[], resolved = false, pattern?: BulletPattern): void {
   if (actor.faction !== 'enemy') return;
   if (!resolved) {
+    actor.navigation = null;
     actor.action = { kind: actor.species === 'spitter' ? 'spit' : 'swipe', basic: true, stage: 'windup', timeMs: 0, durationMs: actor.species === 'spitter' ? 420 : 300,
       dirX: dx, dirY: dy, fromX: actor.x, fromY: actor.y, targetX: actor.x + dx * 100, targetY: actor.y + dy * 100, hitIds: [], generation: 0, ...(actor.species === 'spitter' ? { pattern: enemyPattern(run, actor, dx, dy, true) } : {}) };
     return;
@@ -466,8 +476,13 @@ function basicAttack(run: Run, actor: Actor, dx: number, dy: number, events: Gam
   if (actor.species === 'spitter') { emitPattern(run, actor, pattern ?? enemyPattern(run, actor, dx, dy, true)); return; }
   const reach = actor.species === 'beetle' ? 100 : 84;
   for (const target of targets(run, actor)) {
-    const delta = direction(target.x - actor.x, target.y - actor.y);
-    if (distance(actor, target) <= reach + target.radius * 0.3 && delta.x * dx + delta.y * dy > 0.25 && hasLineOfSight(run, actor, target))
+    const facing = Math.atan2(dy, dx);
+    const angle = Math.atan2(target.y - actor.y, target.x - actor.x) - facing;
+    const nearestAngle = facing + clamp(Math.atan2(Math.sin(angle), Math.cos(angle)), -1.3, 1.3);
+    const nearestDirection = { x: Math.cos(nearestAngle), y: Math.sin(nearestAngle) };
+    const along = clamp((target.x - actor.x) * nearestDirection.x + (target.y - actor.y) * nearestDirection.y, 0, reach);
+    const nearest = { x: actor.x + nearestDirection.x * along, y: actor.y + nearestDirection.y * along };
+    if (distance(target, nearest) <= PLAYER_BULLET_RADIUS && hasLineOfSight(run, actor, target))
       damage(run, target, 1, actor.id, 0, false, `${SPECIES[actor.species].name} landed the final hit.`, events);
   }
 }
@@ -489,6 +504,7 @@ export function previewSpecial(run: Run, actor: Actor, dirX: number, dirY: numbe
 }
 
 function beginSpecial(run: Run, actor: Actor, dx: number, dy: number, generation: 0 | 1, events: GameEvent[], aimDistance?: number): void {
+  actor.navigation = null;
   const aim = specialDirection(actor, dx, dy);
   actor.facingX = aim.x;
   actor.facingY = aim.y;
@@ -496,9 +512,11 @@ function beginSpecial(run: Run, actor: Actor, dx: number, dy: number, generation
   const target = previewSpecial(run, actor, aim.x, aim.y, aimDistance);
   const pattern = enemy && (actor.species === 'spitter' || (actor.elite && actor.volleyCount % 2 === 1)) ? enemyPattern(run, actor, aim.x, aim.y) : undefined;
   actor.action = { kind: pattern || actor.species === 'spitter' ? 'spit' : actor.species === 'beetle' ? 'charge' : 'leap', stage: 'windup', timeMs: 0,
-    durationMs: pattern?.kind === 'ring' ? actor.elite ? 900 : 800 : enemy ? (actor.species === 'beetle' ? 700 : 620) : actor.species === 'spitter' ? 130 : 80,
+    durationMs: pattern?.kind === 'ring' ? actor.elite ? 900 : 800 : enemy ? (actor.species === 'beetle' ? 700 : 620) : actor.species === 'spitter' ? PLAYER_SPIT_WINDUP_MS : PLAYER_MELEE_WINDUP_MS,
     dirX: aim.x, dirY: aim.y, fromX: actor.x, fromY: actor.y, targetX: target.x, targetY: target.y, hitIds: [], generation, ...(actor.species === 'hopper' ? { aimDistance: pounceDistance(aimDistance) } : {}), ...(pattern ? { pattern } : {}) };
-  actor.specialCooldownMs = enemy ? actor.elite ? 2600 : Math.max(1700, SPECIES[actor.species].enemySpecialMs - run.encounterIndex * 200) : SPECIES[actor.species].specialMs;
+  actor.specialCooldownMs = enemy
+    ? actor.elite ? 2600 : Math.max(1700, SPECIES[actor.species].enemySpecialMs - run.encounterIndex * 200)
+    : Math.round(SPECIES[actor.species].specialMs * (has(run, 'echo-tissue') ? 0.6 : 1));
   if (enemy) actor.volleyCount += 1;
   if (actor.faction === 'player') run.counters.specials += 1;
   events.push({ type: 'attack', sourceId: actor.id, x: actor.x, y: actor.y, dirX: aim.x, dirY: aim.y, species: actor.species, kind: generation === 1 ? 'echo' : 'special', phase: 'windup', ...(pattern ? { pattern } : {}) });
@@ -527,7 +545,7 @@ function updateAction(run: Run, actor: Actor, dt: number, events: GameEvent[]): 
       actor.action = null;
       return;
     }
-    action.durationMs = action.kind === 'charge' ? CHARGE_DURATION_MS : actor.faction === 'enemy' ? 480 : 140 + Math.min(1, distance(actor, { x: action.targetX, y: action.targetY }) / LEAP_DISTANCE) * 240;
+    action.durationMs = action.kind === 'charge' ? CHARGE_DURATION_MS : actor.faction === 'enemy' ? 480 : PLAYER_LEAP_BASE_MS + Math.min(1, distance(actor, { x: action.targetX, y: action.targetY }) / LEAP_DISTANCE) * PLAYER_LEAP_RANGE_MS;
     action.fromX = actor.x;
     action.fromY = actor.y;
     if (action.kind === 'charge') {
@@ -546,13 +564,14 @@ function updateAction(run: Run, actor: Actor, dt: number, events: GameEvent[]): 
     actor.x = endpoint.x;
     actor.y = endpoint.y;
     for (const target of targets(run, actor)) {
-      if (action.hitIds.includes(target.id) || segmentDistance(target, before, actor) > actor.radius + target.radius) continue;
+      const targetRadius = target.faction === 'player' ? PLAYER_BULLET_RADIUS : target.radius;
+      if (action.hitIds.includes(target.id) || segmentDistance(target, before, actor) > actor.radius + targetRadius) continue;
       action.hitIds.push(target.id);
       if (!canTakeDamage(target)) continue;
       displace(run, target, action.dirX * 80, action.dirY * 80);
-      damage(run, target, enemy ? 1 : 5, actor.id, action.generation, !enemy && action.generation === 0 && has(run, 'venom-sacs'), 'A charge broke through your body.', events);
+      const hit = damage(run, target, enemy ? 1 : 5, actor.id, action.generation, !enemy && action.generation === 0 && has(run, 'venom-sacs'), 'A charge broke through your body.', events);
       if (target.hp > 0) target.stunMs = 250;
-      events.push({ type: 'impact', x: target.x, y: target.y, radius: 42, kind: 'charge', dirX: action.dirX, dirY: action.dirY });
+      events.push({ type: 'impact', sourceId: actor.id, faction: actor.faction, hitCount: Number(hit), x: target.x, y: target.y, radius: 42, kind: 'charge', dirX: action.dirX, dirY: action.dirY });
     }
     const stopped = distance(before, actor) < plannedDistance - 0.00001;
     if (stopped) {
@@ -570,14 +589,22 @@ function updateAction(run: Run, actor: Actor, dt: number, events: GameEvent[]): 
     actor.y = landing.y;
     const radius = enemy ? LEAP_RADIUS.enemy : LEAP_RADIUS.player;
     const landedTargets = targets(run, actor)
-      .filter(target => distance(actor, target) <= radius + target.radius * 0.4 && hasLineOfSight(run, actor, target))
+      .filter(target => distance(actor, target) <= radius + (target.faction === 'player' ? PLAYER_BULLET_RADIUS : target.radius * 0.4) && hasLineOfSight(run, actor, target))
       .sort((a, b) => distance(actor, a) - distance(actor, b) || a.id - b.id);
+    let hitCount = 0;
     for (const target of landedTargets) {
       const hit = damage(run, target, enemy ? 1 : 5, actor.id, action.generation, !enemy && action.generation === 0 && has(run, 'venom-sacs'), 'A landing crushed your body.', events);
+      if (hit) hitCount += 1;
       if (hit && target.hp > 0) target.stunMs = 400;
     }
-    events.push({ type: 'impact', x: actor.x, y: actor.y, radius, kind: 'leap' });
+    events.push({ type: 'impact', sourceId: actor.id, faction: actor.faction, hitCount, x: actor.x, y: actor.y, radius, kind: 'leap' });
     actor.action = null;
+  } else if (action.kind === 'dash') {
+    const plannedDistance = DASH_SPEED * activeDt / 1000;
+    const endpoint = previewCharge(run, actor, action.dirX, action.dirY, plannedDistance);
+    actor.x = endpoint.x;
+    actor.y = endpoint.y;
+    if (action.timeMs >= action.durationMs) actor.action = null;
   }
 }
 
@@ -611,18 +638,19 @@ function switchBody(run: Run, corpseId: number, events: GameEvent[]): boolean {
     beginSpecial(run, echo, old.lastSpecial.dirX, old.lastSpecial.dirY, 1, events, old.lastSpecial.aimDistance);
     events.push({ type: 'mutation', mutationId: 'echo-tissue', x: old.x, y: old.y });
   }
-  if (run.phase === 'playing' && has(run, 'silk-trail') && run.areas.length < 32) {
-    run.areas.push({ id: run.nextEntityId++, ownerId: fresh.id, kind: 'silk', x: old.x, y: old.y, toX: fresh.x, toY: fresh.y, radius: 12, remainingMs: 2600, tickMs: 0, hitIds: [] });
+  if (run.phase === 'playing' && has(run, 'silk-trail')) {
+    run.silkTrail = { x: fresh.x, y: fresh.y, remainingMs: 2000, segmentId: null };
     events.push({ type: 'mutation', mutationId: 'silk-trail', x: fresh.x, y: fresh.y });
   }
   if (run.phase === 'playing' && has(run, 'shock-molt')) {
-    for (const target of run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && distance(actor, fresh) < 135)) {
+    const affected = run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && distance(actor, fresh) < 135);
+    for (const target of affected) {
       const away = direction(target.x - fresh.x, target.y - fresh.y);
       displace(run, target, away.x * 110, away.y * 110);
       target.stunMs = 600;
       target.action = null;
     }
-    events.push({ type: 'impact', x: fresh.x, y: fresh.y, radius: 135, kind: 'shock' });
+    events.push({ type: 'impact', sourceId: fresh.id, faction: fresh.faction, hitCount: affected.length, x: fresh.x, y: fresh.y, radius: 135, kind: 'shock' });
     events.push({ type: 'mutation', mutationId: 'shock-molt', x: fresh.x, y: fresh.y });
   }
   if (run.phase === 'cleared') {
@@ -632,21 +660,72 @@ function switchBody(run: Run, corpseId: number, events: GameEvent[]): boolean {
   return true;
 }
 
-function moveEnemy(run: Run, actor: Actor, dx: number, dy: number, dt: number): void {
-  let desired = direction(dx, dy);
-  const look = { x: actor.x + desired.x * 70, y: actor.y + desired.y * 70 };
-  if (run.obstacles.some(rect => crossesRect(actor, look, rect, actor.radius + 3))) {
-    const alternatives = [
-      { x: -desired.y, y: desired.x }, { x: desired.y, y: -desired.x },
-      { x: desired.x * 0.5 - desired.y * 0.86, y: desired.y * 0.5 + desired.x * 0.86 },
-      { x: desired.x * 0.5 + desired.y * 0.86, y: desired.y * 0.5 - desired.x * 0.86 },
-    ];
-    const player = getPlayer(run);
-    const open = alternatives.filter(vector => !run.obstacles.some(rect => crossesRect(actor, { x: actor.x + vector.x * 70, y: actor.y + vector.y * 70 }, rect, actor.radius + 3)));
-    open.sort((a, b) => distance({ x: actor.x + a.x * 100, y: actor.y + a.y * 100 }, player) - distance({ x: actor.x + b.x * 100, y: actor.y + b.y * 100 }, player));
-    desired = open[0] ?? { x: 0, y: 0 };
+function canWalkTo(run: Run, actor: Actor, from: Vec2, to: Vec2): boolean {
+  const endpoint = previewCharge(run, { ...from, radius: actor.radius }, to.x - from.x, to.y - from.y, distance(from, to));
+  return distance(endpoint, to) < 0.001;
+}
+
+function routeWaypoint(run: Run, actor: Actor, goal: Vec2, retreat: boolean): Vec2 | null {
+  const clearance = actor.radius + 2;
+  const corners = run.obstacles.flatMap(rect => [
+    { x: rect.x - clearance, y: rect.y - clearance }, { x: rect.x + rect.width + clearance, y: rect.y - clearance },
+    { x: rect.x - clearance, y: rect.y + rect.height + clearance }, { x: rect.x + rect.width + clearance, y: rect.y + rect.height + clearance },
+  ]).filter(point => distance(point, fitPosition(run, point.x, point.y, actor.radius)) < 0.001);
+  const nodes = [actor, goal, ...corners];
+  const costs = nodes.map(() => Infinity), previous = nodes.map(() => -1), visited = new Set<number>();
+  const player = getPlayer(run);
+  costs[0] = 0;
+  for (let count = 0; count < nodes.length; count++) {
+    let nearest = -1;
+    for (let index = 0; index < nodes.length; index++) {
+      if (!visited.has(index) && (nearest < 0 || costs[index]! < costs[nearest]!)) nearest = index;
+    }
+    if (nearest < 0 || !Number.isFinite(costs[nearest]) || nearest === 1) break;
+    visited.add(nearest);
+    for (let index = 0; index < nodes.length; index++) {
+      if (visited.has(index)) continue;
+      const from = nodes[nearest]!, to = nodes[index]!;
+      if (retreat && nearest === 0 && (to.x - actor.x) * (actor.x - player.x) + (to.y - actor.y) * (actor.y - player.y) < 0) continue;
+      if (!canWalkTo(run, actor, from, to)) continue;
+      const cost = costs[nearest]! + distance(from, to);
+      if (cost >= costs[index]!) continue;
+      costs[index] = cost;
+      previous[index] = nearest;
+    }
   }
-  moveActor(run, actor, desired.x * SPECIES[actor.species].speed * 0.62 * dt / 1000, desired.y * SPECIES[actor.species].speed * 0.62 * dt / 1000);
+  if (previous[1] === -1) return null;
+  let next = 1;
+  while (previous[next]! > 0) next = previous[next]!;
+  const point = nodes[next]!;
+  return { x: point.x, y: point.y };
+}
+
+function moveEnemy(run: Run, actor: Actor, dx: number, dy: number, dt: number, retreat = false, minimumRange = 0): void {
+  const desired = direction(dx, dy), player = getPlayer(run);
+  const goal = retreat ? fitPosition(run, actor.x + desired.x * 180, actor.y + desired.y * 180, actor.radius)
+    : fitPosition(run, player.x, player.y, actor.radius);
+  const travel = SPECIES[actor.species].speed * ENEMY_WALK_SPEED_SCALE * dt / 1000;
+  let target = goal;
+  if (canWalkTo(run, actor, actor, goal)) actor.navigation = null;
+  else {
+    const route = actor.navigation;
+    const retreatReversed = retreat && route && ((route.waypoint.x - actor.x) * (actor.x - player.x) + (route.waypoint.y - actor.y) * (actor.y - player.y) < 0);
+    if (!route || retreatReversed || route.retreat !== retreat || distance(route.goal, goal) > 80 || distance(actor, route.waypoint) <= Math.max(2, travel)
+      || !canWalkTo(run, actor, actor, route.waypoint)) {
+      const waypoint = routeWaypoint(run, actor, goal, retreat);
+      actor.navigation = waypoint ? { waypoint, goal, retreat } : null;
+    }
+    if (!actor.navigation) return;
+    target = actor.navigation.waypoint;
+  }
+  if (retreat && ((target.x - actor.x) * (actor.x - player.x) + (target.y - actor.y) * (actor.y - player.y) < 0)) { actor.navigation = null; return; }
+  let aim = direction(target.x - actor.x, target.y - actor.y);
+  if (minimumRange > 0 && distance(actor, player) < minimumRange + travel) {
+    const toward = direction(player.x - actor.x, player.y - actor.y), inward = aim.x * toward.x + aim.y * toward.y;
+    if (inward > 0) aim = direction(aim.x - toward.x * inward, aim.y - toward.y * inward);
+  }
+  const amount = Math.min(travel, distance(actor, target));
+  moveActor(run, actor, aim.x * amount, aim.y * amount);
 }
 
 function updateEnemy(run: Run, actor: Actor, dt: number, events: GameEvent[]): void {
@@ -666,16 +745,33 @@ function updateEnemy(run: Run, actor: Actor, dt: number, events: GameEvent[]): v
     return;
   }
   if (actor.species === 'spitter') {
-    if (length > 300 || !hasLineOfSight(run, actor, player)) moveEnemy(run, actor, toward.x, toward.y, dt);
-    else if (length < 180) moveEnemy(run, actor, -toward.x, -toward.y, dt);
+    if (length < 180 && hasLineOfSight(run, actor, player)) moveEnemy(run, actor, -toward.x, -toward.y, dt, true);
+    else if (length > 300 || !hasLineOfSight(run, actor, player)) moveEnemy(run, actor, toward.x, toward.y, dt);
+    else if (!hasLineOfSight(run, actor, player, actor.elite ? 6 : 8)) moveEnemy(run, actor, toward.x, toward.y, dt, false, 180);
   } else if (length > actor.radius + player.radius + 12) moveEnemy(run, actor, toward.x, toward.y, dt);
   const range = actor.species === 'spitter' ? 440 : actor.species === 'beetle' ? 108 : 92;
   if (actor.basicCooldownMs <= 0 && length < range && hasLineOfSight(run, actor, player)) basicAttack(run, actor, toward.x, toward.y, events);
 }
 
 function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
+  const homing = has(run, 'venom-sacs');
   for (const shot of run.projectiles) {
     if (run.phase !== 'playing' && run.phase !== 'cleared') break;
+    if (homing && shot.faction === 'player') {
+      const target = run.actors
+        .filter(actor => actor.faction === 'enemy' && actor.hp > 0 && !(actor.action?.kind === 'leap' && actor.action.stage === 'active'))
+        .sort((a, b) => distance(shot, a) - distance(shot, b))[0];
+      if (target && distance(shot, target) <= 280) {
+        const speed = Math.hypot(shot.vx, shot.vy);
+        const current = Math.atan2(shot.vy, shot.vx);
+        const desired = Math.atan2(target.y - shot.y, target.x - shot.x);
+        const diff = Math.atan2(Math.sin(desired - current), Math.cos(desired - current));
+        const maxTurn = 4.6 * dt / 1000;
+        const next = current + clamp(diff, -maxTurn, maxTurn);
+        shot.vx = Math.cos(next) * speed;
+        shot.vy = Math.sin(next) * speed;
+      }
+    }
     shot.prevX = shot.x;
     shot.prevY = shot.y;
     shot.x += shot.vx * dt / 1000;
@@ -688,6 +784,16 @@ function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
         const aim = direction(shot.vx, shot.vy);
         events.push({ type: 'surface', sourceId: shot.ownerId, ...surface, dirX: aim.x, dirY: aim.y, kind: 'spit', faction: shot.generation === 1 ? 'echo' : shot.faction });
       }
+      if (shot.faction === 'player' && (shot.bounces ?? 0) > 0) {
+        shot.bounces = (shot.bounces ?? 1) - 1;
+        const hitX = shot.x < 0 || shot.x > WORLD_WIDTH || run.obstacles.some(rect => crossesRect(start, { x: shot.x, y: shot.prevY }, rect, shot.radius));
+        const hitY = shot.y < 0 || shot.y > WORLD_HEIGHT || run.obstacles.some(rect => crossesRect(start, { x: shot.prevX, y: shot.y }, rect, shot.radius));
+        if (hitX || !hitY) shot.vx = -shot.vx;
+        if (hitY || !hitX) shot.vy = -shot.vy;
+        shot.x = shot.prevX;
+        shot.y = shot.prevY;
+        continue;
+      }
       shot.lifeMs = 0;
       continue;
     }
@@ -696,15 +802,48 @@ function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
     const hit = possible.filter(actor => !(actor.action?.kind === 'leap' && actor.action.stage === 'active') && segmentDistance(actor, start, shot) < (actor.faction === 'player' && shot.faction === 'enemy' ? PLAYER_BULLET_RADIUS : actor.radius) + shot.radius)
       .sort((a, b) => distance(start, a) - distance(start, b) || a.id - b.id)[0];
     if (!hit) continue;
-    damage(run, hit, shot.damage, shot.ownerId, shot.generation, shot.poison, 'A spit struck your exposed body.', events);
+    damage(run, hit, shot.damage, shot.ownerId, shot.generation, shot.poison, shot.kind === 'barb' ? 'A barb struck your exposed body.' : 'A spit struck your exposed body.', events);
     shot.lifeMs = 0;
   }
   run.projectiles = run.projectiles.filter(shot => shot.lifeMs > 0);
 }
 
+function updateSilkTrail(run: Run, dt: number, wasAirborne: boolean): void {
+  const trail = run.silkTrail;
+  if (!trail) return;
+  const player = getPlayer(run);
+  const airborne = wasAirborne || (player.action?.kind === 'leap' && player.action.stage === 'active');
+  const moved = distance(trail, player) > 0.01;
+  if (airborne || run.obstacles.some(rect => crossesRect(trail, player, rect, 12))) trail.segmentId = null;
+  else if (moved) {
+    const segment = run.areas.find(area => area.id === trail.segmentId && area.remainingMs > 0);
+    if (segment && distance(segment, player) <= 32 && distance(segment, player) >= distance(segment, trail) && segmentDistance(trail, segment, player) <= 2 &&
+      !run.obstacles.some(rect => crossesRect(segment, player, rect, 12))) {
+      segment.toX = player.x;
+      segment.toY = player.y;
+    } else {
+      if (run.areas.length >= 32) {
+        const oldestSilk = run.areas.findIndex(area => area.kind === 'silk');
+        if (oldestSilk >= 0) run.areas.splice(oldestSilk, 1);
+      }
+      if (run.areas.length < 32) {
+        const id = run.nextEntityId++;
+        run.areas.push({ id, ownerId: player.id, kind: 'silk', x: trail.x, y: trail.y, toX: player.x, toY: player.y,
+          radius: 12, remainingMs: 2600, tickMs: 0, hitIds: [] });
+        trail.segmentId = id;
+      }
+    }
+  }
+  trail.x = player.x;
+  trail.y = player.y;
+  trail.remainingMs -= dt;
+  if (trail.remainingMs <= 0) run.silkTrail = null;
+}
+
 function updateAreas(run: Run, dt: number, events: GameEvent[]): void {
   for (const area of run.areas) {
     area.remainingMs -= dt;
+    if (area.remainingMs <= 0) continue;
     area.tickMs -= dt;
     if (area.kind === 'acid' && area.tickMs > 0) continue;
     if (area.kind === 'acid') area.tickMs = 600;
@@ -741,9 +880,12 @@ function finishEncounter(run: Run, events: GameEvent[]): void {
   run.completedEncounters = run.encounterIndex + 1;
   run.projectiles = [];
   run.areas = [];
+  run.silkTrail = null;
   const player = getPlayer(run);
-  if (player.action?.kind === 'leap' && player.action.stage === 'active') Object.assign(player, fitPosition(run, player.x, player.y, player.radius));
-  player.action = null;
+  if (run.core < run.maxCore) {
+    run.core = Math.min(run.maxCore, run.core + 1);
+    player.hp = run.core;
+  }
   player.specialCooldownMs = 0;
   player.basicCooldownMs = 0;
   run.actors = [player];
@@ -776,24 +918,58 @@ function spawnNextGroup(run: Run, events: GameEvent[]): void {
   const ids: number[] = [];
   for (const [index, spawn] of encounter.groups[run.encounterGroup]!.entries()) {
     const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
-    if (distance(enemy, player) < 180 || run.actors.some(actor => actor.hp > 0 && distance(enemy, actor) < enemy.radius + actor.radius + 10)) {
+    const onLethalFloor = (point: Vec2) => enemy.elite && run.areas.some(area => area.remainingMs > 0 && (area.kind === 'silk'
+      ? segmentDistance(point, area, { x: area.toX, y: area.toY }) <= area.radius + enemy.radius
+      : distance(point, area) <= area.radius + enemy.radius * 0.4));
+    if (distance(enemy, player) < 180 || run.actors.some(actor => actor.hp > 0 && distance(enemy, actor) < enemy.radius + actor.radius + 10) || onLethalFloor(enemy)) {
       const candidates = [{ x: spawn.x - 180, y: spawn.y }, { x: spawn.x + 180, y: spawn.y }, { x: spawn.x, y: spawn.y - 180 }, { x: spawn.x, y: spawn.y + 180 }, ...[100, 230, 360, 490, 620].flatMap(x => [140, 300, 480, 660, 820].map(y => ({ x, y })))]
         .map(point => fitPosition(run, point.x, point.y, enemy.radius))
         .filter(point => distance(point, player) >= 180 && run.actors.every(actor => actor.hp <= 0 || distance(point, actor) > enemy.radius + actor.radius + 10))
         .sort((a, b) => distance(a, spawn) - distance(b, spawn));
-      if (candidates[0]) Object.assign(enemy, candidates[0]);
+      // A fully covered room still spawns on time, with normal one-hit vulnerability.
+      const arrival = candidates.find(point => !onLethalFloor(point)) ?? candidates[0];
+      if (arrival) Object.assign(enemy, arrival);
     }
     enemy.basicCooldownMs = 1100 + index * 150;
-    enemy.specialCooldownMs = 1500 + index * 200;
+    enemy.specialCooldownMs = enemy.elite ? 0 : 1500 + index * 200;
+    if (enemy.elite) enemy.volleyCount = 1;
     run.actors.push(enemy);
     ids.push(enemy.id);
   }
   events.push({ type: 'spawn', ids, group: run.encounterGroup, totalGroups: encounter.groups.length });
 }
 
+function beginDash(run: Run, player: Actor, dirX: number, dirY: number, events: GameEvent[]): void {
+  const dashDir = direction(dirX, dirY);
+  const aim = dashDir.x || dashDir.y ? dashDir : direction(player.facingX, player.facingY);
+  const endpoint = previewCharge(run, player, aim.x, aim.y, DASH_SPEED * DASH_DURATION_MS / 1000);
+  player.action = {
+    kind: 'dash', stage: 'active', timeMs: 0, durationMs: DASH_DURATION_MS,
+    dirX: aim.x, dirY: aim.y, fromX: player.x, fromY: player.y, targetX: endpoint.x, targetY: endpoint.y,
+    hitIds: [], generation: 0,
+  };
+  player.basicCooldownMs = DASH_COOLDOWN_MS;
+  player.invulnerableMs = Math.max(player.invulnerableMs, DASH_INVULNERABLE_MS);
+  if (run.phase === 'playing' && has(run, 'shock-molt')) {
+    run.projectiles = run.projectiles.filter(shot => shot.faction !== 'enemy' || distance(shot, player) > 140);
+    const affected = run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && distance(actor, player) < 140);
+    for (const target of affected) {
+      const away = direction(target.x - player.x, target.y - player.y);
+      displace(run, target, away.x * 110, away.y * 110);
+      target.stunMs = 500;
+      target.action = null;
+    }
+    events.push({ type: 'impact', sourceId: player.id, faction: player.faction, hitCount: affected.length, x: player.x, y: player.y, radius: 140, kind: 'shock' });
+    events.push({ type: 'mutation', mutationId: 'shock-molt', x: player.x, y: player.y });
+  }
+}
+
 function updatePlayer(run: Run, player: Actor, input: InputFrame, dt: number, events: GameEvent[]): void {
   const moving = direction(input.moveX, input.moveY);
   const magnitude = Math.min(1, Math.hypot(input.moveX, input.moveY));
+  if (input.dashPressed && player.basicCooldownMs <= 0 && (!player.action || player.action.stage === 'windup')) {
+    beginDash(run, player, magnitude > 0 ? moving.x : player.facingX, magnitude > 0 ? moving.y : player.facingY, events);
+  }
   if (player.action) {
     const walkingMs = player.action.kind === 'spit' ? dt : player.action.stage === 'windup' ? Math.min(dt, player.action.durationMs - player.action.timeMs) : 0;
     if (Number.isFinite(magnitude) && walkingMs > 0)
@@ -847,6 +1023,7 @@ export function step(run: Run, input: InputFrame, dtMs = TICK_MS): GameEvent[] {
   const player = getPlayer(run);
   const aim = direction(player.action?.dirX ?? input.aimX, player.action?.dirY ?? input.aimY);
   if (aim.x || aim.y) { player.facingX = aim.x; player.facingY = aim.y; }
+  const wasAirborne = player.action?.kind === 'leap' && player.action.stage === 'active';
   for (const actor of [...run.actors]) {
     if (run.phase !== 'playing') break;
     if (actor.hp <= 0) continue;
@@ -871,6 +1048,7 @@ export function step(run: Run, input: InputFrame, dtMs = TICK_MS): GameEvent[] {
   }
   if (run.phase === 'playing') {
     separateActors(run);
+    updateSilkTrail(run, dt, wasAirborne);
     updateProjectiles(run, dt, events);
     if (run.phase === 'playing') updateAreas(run, dt, events);
   }
@@ -878,7 +1056,7 @@ export function step(run: Run, input: InputFrame, dtMs = TICK_MS): GameEvent[] {
   if (run.phase === 'playing') {
     const remaining = run.actors.filter(actor => actor.faction === 'enemy').length;
     const groups = getEncounter(run.challenge, run.encounterIndex).groups;
-    const threshold = groups[run.encounterGroup]!.length === 1 ? 0 : 1;
+    const threshold = groups[run.encounterGroup]!.length === 1 || groups[run.encounterGroup + 1]?.some(spawn => spawn.elite) ? 0 : 1;
     if (remaining <= threshold && run.encounterGroup < groups.length - 1) spawnNextGroup(run, events);
     else if (remaining === 0) finishEncounter(run, events);
   }

@@ -1328,12 +1328,11 @@ export function createCorpseTexture(
     );
     path(
       ctx,
-      "M-20 -2 -16 -10 -9 -6 -3 -8 -5 1 -9 4 -10 9 -17 5 -16 1 Z",
+      "M-25 -3 Q-25 -12 -15 -14 L-7 -10 1 -12 -2 -4 3 2 -4 5 -7 12 -17 10 -24 4 Z",
       ink.edge
     );
-    line(ctx, [-19, -2, -15, -7, -9, -3, -5, -5], INK.light, 2.5);
-    line(ctx, [-18, 3, -14, 7, -8, 3], ink.dark, 1.3);
-    path(ctx, "M-15-6Q-8-2-12 6L-16 2-13-1Z", "#d9c794", ink.edge, 0.8);
+    line(ctx, [-24, -4, -21, -10, -15, -12, -7, -8], "#d9c794", 3);
+    line(ctx, [-21, 5, -16, 8, -9, 7], ink.flesh, 1.8);
   }
   return canvas;
 }
@@ -1345,23 +1344,20 @@ export function paintTitle(
   dark = false
 ) {
   const letters = [
-    "M7 5 33 3 52 11 57 27 48 37 59 49 54 67 34 76 5 72Z M23 17 22 31 35 30 40 25 37 19Z M22 45 21 60 36 61 41 54 37 46Z",
+    "M5 5 22 3 34 29 47 4 63 5 61 74 44 73 45 35 34 54 22 36 21 74 4 72Z",
     "M20 3 43 5 58 21 55 58 41 74 18 72 4 54 6 19Z M24 19 20 26 20 54 27 59 38 57 42 49 41 26 36 19Z",
-    "M6 4 31 3 52 15 60 34 56 57 39 73 5 72Z M23 20 21 56 33 56 42 46 42 31 34 21Z",
-    "M3 4 22 5 32 26 43 4 61 4 41 45 40 73 21 74 22 45Z",
-    "M6 4 23 3 22 28 41 28 43 4 60 3 57 73 39 74 40 46 22 46 20 74 4 72Z",
-    "M20 3 44 5 58 21 55 58 41 74 17 73 4 55 6 19Z M24 19 20 26 20 54 27 59 38 57 42 49 41 26 36 19Z",
-    "M6 5 36 3 55 14 60 32 49 47 23 50 21 73 4 73Z M24 20 23 34 36 33 42 28 38 20Z",
+    "M6 4 25 3 23 55 57 54 55 74 4 72Z",
+    "M3 5 60 3 59 21 40 20 38 74 21 73 22 21 4 22Z",
   ];
   ctx.clearRect(0, 0, width, height);
   ctx.save();
-  const scale = Math.min(width / 510, height / 108);
-  ctx.translate((width - 510 * scale) / 2, (height - 100 * scale) / 2);
+  const scale = Math.min(width / 282, height / 108);
+  ctx.translate((width - 282 * scale) / 2, (height - 100 * scale) / 2);
   ctx.scale(scale, scale);
   for (const [index, letter] of letters.entries()) {
     ctx.save();
     ctx.translate(
-      10 + index * 67 + (index > 3 ? 28 : 0),
+      10 + index * 67,
       12 + Math.sin(index * 2.5) * 3
     );
     ctx.rotate((index % 2 ? 1 : -1) * 0.025);
@@ -1387,14 +1383,14 @@ export function paintTitle(
   paintParasite(
     ctx,
     [
-      { x: 110, y: 72 },
-      { x: 102, y: 65 },
-      { x: 106, y: 53 },
-      { x: 121, y: 48 },
-      { x: 135, y: 53 },
-      { x: 138, y: 65 },
-      { x: 151, y: 77 },
-      { x: 166, y: 76 },
+      { x: 103, y: 72 },
+      { x: 95, y: 65 },
+      { x: 99, y: 53 },
+      { x: 114, y: 48 },
+      { x: 128, y: 53 },
+      { x: 131, y: 65 },
+      { x: 144, y: 77 },
+      { x: 159, y: 76 },
     ],
     3.5
   );

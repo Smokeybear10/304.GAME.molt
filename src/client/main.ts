@@ -3,7 +3,7 @@ import { ProgressStore } from "./persistence";
 import { GameInput } from "./input";
 import { GameAudio } from "./audio";
 import { mountGame } from "./game";
-import { getPostUrl } from "./platform";
+import { getHostMode, getPostUrl } from "./platform";
 import {
   createCorpseTexture,
   paintCreature,
@@ -12,6 +12,7 @@ import {
   paintTitle,
 } from "./art";
 import {
+  DASH_COOLDOWN_MS,
   TICK_MS,
   ENCOUNTER_COUNT,
   MUTATIONS,
@@ -31,8 +32,6 @@ import {
   pause,
   resume,
   getPlayer,
-  getNearbyBody,
-  canSwitchBody,
 } from "../shared/engine";
 import type {
   GameEvent,
@@ -62,7 +61,7 @@ const clock = (ms: number) =>
   `${Math.floor(ms / 60000)}:${Math.floor((ms / 1000) % 60)
     .toString()
     .padStart(2, "0")}`;
-const touchControls = matchMedia("(pointer: coarse)").matches;
+const touchControls = matchMedia("(any-pointer: coarse)").matches;
 let store: ProgressStore;
 let run: Run;
 let input: GameInput | null = null;
@@ -72,12 +71,14 @@ let graphicsLost = false;
 let accumulator = 0;
 let lastPhase = "";
 let settingsOpen = false;
+let pauseReason = "";
 let replacement: MutationId | null = null;
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
 let reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let savedBoundary = "";
 let lastHud = "";
 let restored = false;
+let recoveredResult: RunResult | null = null;
 let resultRevealAt = 0;
 let healthNotice = "";
 let healthNoticeUntil = 0;
@@ -175,6 +176,7 @@ function dispatch(events: GameEvent[]) {
 }
 
 function saveBoundary() {
+  if (recoveredResult) return;
   if (
     run.phase !== "ready" &&
     run.phase !== "reward" &&
@@ -223,7 +225,7 @@ function tick(dt: number) {
 }
 
 function begin() {
-  if (!rendererReady || graphicsLost) return;
+  if (!rendererReady || graphicsLost || recoveredResult) return;
   if (store.status === "conflict") {
     pauseGame();
     return;
@@ -238,26 +240,30 @@ function begin() {
   if (run.phase === "ready") dispatch(startEncounter(run));
   else if (run.phase === "paused") resume(run);
   settingsOpen = false;
+  pauseReason = "";
   updateUi(true);
   renderer?.game.canvas.focus({ preventScroll: true });
 }
 
 function pauseGame(message?: string) {
-  if (!run || run.phase === "dead" || run.phase === "escaped") return;
+  if (!run || recoveredResult || run.phase === "dead" || run.phase === "escaped") return;
   if (run.phase !== "paused") {
+    pauseReason = message ?? "";
     pause(run);
     metrics.pauses++;
-  }
+  } else if (message) pauseReason = message;
   input?.clear();
   accumulator = 0;
   updateUi(true);
-  if (message) hint(message);
 }
 
 function newAttempt() {
+  recoveredResult = null;
+  resultRevealAt = 0;
   run = createRun(store.bootstrap.challenge, "shared", crypto.randomUUID());
   replacement = null;
   settingsOpen = false;
+  pauseReason = "";
   restored = false;
   savedBoundary = "";
   lastPhase = "";
@@ -281,13 +287,15 @@ function updateSaveStatus() {
   target.textContent =
     store.status === "saved" &&
     run &&
-    (run.phase === "dead" || run.phase === "escaped")
+    (recoveredResult || run.phase === "dead" || run.phase === "escaped")
       ? "Run saved"
       : labels[store.status];
   target.title =
     store.error ??
     "Progress saves between chambers. Leaving during a fight restarts that chamber.";
   target.dataset.status = store.status;
+  const retry = document.getElementById("retry-button");
+  if (retry && store.status === "conflict") retry.textContent = "Reload saved run";
   if (
     store.status === "conflict" &&
     run &&
@@ -319,7 +327,7 @@ function healthPips(value: number, maximum: number) {
 }
 
 function healthExplanation() {
-  return "Switch into a fresh body to recover 1 life, up to 3. At 0 life, the run ends.";
+  return "Clear a chamber to recover 1 heart, up to 3. Dash with Space or Click to pass through bullets. At 0 hearts, the run ends.";
 }
 
 function updateHud() {
@@ -338,8 +346,7 @@ function updateHud() {
     element("life-group").classList.toggle("low-life", lowLife);
     element("life-warning").hidden = !lowLife;
     element("hud").dataset.lowLife = String(lowLife);
-    element("host-name").textContent =
-      SPECIES[player.species].name.toUpperCase();
+    element("host-name").textContent = `${run.mutations.length} / 5`;
     element("health-note").title = healthExplanation();
     element("chamber-value").textContent = `${String(
       run.encounterIndex + 1
@@ -349,84 +356,51 @@ function updateHud() {
     );
     element("mutation-strip").innerHTML = run.mutations.length
       ? run.mutations
-          .map((id) => {
-            if (id !== "echo-tissue")
-              return `<span title="${MUTATIONS[id].description}">${MUTATIONS[id].name}</span>`;
-            const stored = player.lastSpecial;
-            if (!stored)
-              return '<span title="Attack to store what this body repeats when you take another body.">Echo: attack to store</span>';
-            const arrows = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"];
-            const direction =
-              (Math.round(
-                Math.atan2(stored.dirY, stored.dirX) / (Math.PI / 4)
-              ) +
-                8) %
-              8;
-            return `<span class="echo-armed" title="This body repeats ${
-              SPECIES[stored.species].action
-            } in its stored direction when you take another body.">Echo: ${
-              SPECIES[stored.species].action
-            } ${arrows[direction]}</span>`;
-          })
+          .map(
+            (id) =>
+              `<span title="${MUTATIONS[id].description}">${MUTATIONS[id].name}</span>`
+          )
           .join("")
       : "";
-    element("ability-name").textContent =
-      SPECIES[player.species].action.toUpperCase();
     if (touchControls)
       element("control-tip").innerHTML =
-        player.species === "hopper"
-          ? "Drag to set your landing.<br>Short drag, short Pounce."
-          : "Drag your attack to aim.<br>Tap to target a threat.";
+        "Auto-fires at nearest foe.<br>Tap Dash to dodge bullets.";
   }
-  setText("health-note",
-    run.core <= 0 ? "No life left. This run is over."
-      : performance.now() < healthNoticeUntil ? healthNotice
-      : lowLife ? "1 LIFE · Switch bodies to heal."
-      : touchControls ? "SWITCH to a nearby body. Recover 1 life." : "Right-click / E: switch nearby. Heal 1."
+  const dashReady =
+    player.stunMs <= 0 &&
+    player.basicCooldownMs <= 0 &&
+    (!player.action || player.action.stage === "windup");
+  setText("ability-name", "DASH");
+  setText(
+    "health-note",
+    run.core <= 0
+      ? "No life left. This run is over."
+      : performance.now() < healthNoticeUntil
+      ? healthNotice
+      : lowLife
+      ? "1 LIFE · Clear the room to heal +1."
+      : "Space / Click to dash through bullets."
   );
-  element("health-note").dataset.notice = performance.now() < healthNoticeUntil ? healthNoticeKind : "";
-  const nearby = run.phase === "playing" || run.phase === "cleared" ? getNearbyBody(run) : null;
-  const switchButton = element<HTMLButtonElement>("switch-button");
-  switchButton.hidden = run.phase !== "playing" && run.phase !== "cleared";
-  switchButton.disabled = !nearby;
-  const switchReady = nearby !== null && canSwitchBody(run, nearby.id);
-  switchButton.dataset.ready = String(switchReady);
-  if (nearby) {
-    const name = SPECIES[nearby.species].name;
-    const recovery = run.core < run.maxCore ? "+1 LIFE" : "LIFE FULL";
-    setText("switch-target", `${name} · ${switchReady ? recovery : "RECOVERING"}`);
-    switchButton.setAttribute("aria-label", `Switch to ${name}${run.core < run.maxCore ? " and recover 1 life" : ". Life is full"}`);
-    switchButton.title = switchReady ? `Right-click / E · Switch to ${name} · ${recovery}` : "Switch is recovering. A slightly early press is remembered.";
-  } else {
-    setText("switch-target", "Move near a body");
-    switchButton.setAttribute("aria-label", "Switch bodies. Move closer to a defeated enemy.");
-    switchButton.title = "Move near a defeated enemy. Its body will light up.";
-  }
-  const abilityReady =
-    !player.action && player.stunMs <= 0 && player.specialCooldownMs <= 0;
+  element("health-note").dataset.notice =
+    performance.now() < healthNoticeUntil ? healthNoticeKind : "";
   setText(
     "ability-state",
     player.stunMs > 0
       ? "STUNNED"
-      : player.action
-      ? "ACTING"
-      : player.specialCooldownMs > 0
-      ? `${(player.specialCooldownMs / 1000).toFixed(1)}s`
+      : player.action?.kind === "dash"
+      ? "DASHING"
+      : player.basicCooldownMs > 0
+      ? `${(player.basicCooldownMs / 1000).toFixed(1)}s`
       : "READY"
   );
-  element("ability-button").classList.toggle("cooling", !abilityReady);
+  element("ability-button").classList.toggle("cooling", !dashReady);
   element("ability-button").style.setProperty(
     "--charge",
-    String(
-      Math.max(
-        0,
-        1 - player.specialCooldownMs / SPECIES[player.species].specialMs
-      )
-    )
+    String(Math.max(0, 1 - player.basicCooldownMs / DASH_COOLDOWN_MS))
   );
   element("ability-button").title = touchControls
-    ? `Drag to aim ${SPECIES[player.species].action}, then release`
-    : `${SPECIES[player.species].action} · click or Space`;
+    ? "Tap to dash through enemy bullets"
+    : "Dash through bullets · Click or Space";
   element("sound-button").dataset.muted = String(audio.muted);
   element("sound-button").title = audio.muted ? "Unmute sound" : "Mute sound";
   element("sound-button").setAttribute(
@@ -441,7 +415,7 @@ function updateHud() {
     run.phase === "paused" ? "Resume game" : "Pause game"
   );
   element<HTMLButtonElement>("pause-button").disabled =
-    graphicsLost || run.phase === "dead" || run.phase === "escaped";
+    graphicsLost || Boolean(recoveredResult) || run.phase === "dead" || run.phase === "escaped";
 }
 
 function showScreen(markup: string) {
@@ -475,7 +449,7 @@ function drawPortrait(species: Species, showParasite = false) {
       ],
       4
     );
-    paintCreature(ctx, "beetle", 133, 75, -0.35, {
+    paintCreature(ctx, species, 133, 75, -0.35, {
       possessed: true,
       scale: 1.42,
     });
@@ -492,7 +466,8 @@ function drawPortrait(species: Species, showParasite = false) {
 function updateUi(force = false) {
   if (!rendererReady) return;
   updateHud();
-  const phaseKey = `${run.runId}:${run.phase}:${run.encounterIndex}:${settingsOpen}:${replacement}`;
+  const phase = recoveredResult?.outcome ?? run.phase;
+  const phaseKey = `${recoveredResult?.runId ?? run.runId}:${phase}:${run.encounterIndex}:${settingsOpen}:${replacement}`;
   if (phaseKey === lastPhase && !force && !resultRevealAt) return;
   if (renderer && !renderer.game.loop.running) {
     queueMicrotask(() => {
@@ -504,13 +479,18 @@ function updateUi(force = false) {
     });
   }
   lastPhase = phaseKey;
-  document.body.dataset.phase = run.phase;
-  if (run.phase !== "dead" && run.phase !== "escaped")
+  document.body.dataset.phase = phase;
+  document.body.dataset.recoveredResult = String(Boolean(recoveredResult));
+  if (phase !== "dead" && phase !== "escaped")
     delete document.body.dataset.result;
   if (run.phase !== "playing" && run.phase !== "cleared") input?.clear();
   saveBoundary();
   if (settingsOpen) {
     renderSettings();
+    return;
+  }
+  if (recoveredResult) {
+    renderResult(recoveredResult);
     return;
   }
   if (run.phase === "playing" || run.phase === "cleared") {
@@ -552,36 +532,30 @@ function renderReady() {
   }</span>
     ${
       first
-        ? '<canvas id="title-art" class="title-art" width="1020" height="216" role="img" aria-label="BODY HOP"></canvas>'
+        ? '<canvas id="title-art" class="title-art" width="1020" height="216" role="img" aria-label="MOLT"></canvas>'
         : `<h1>${chamber.name}</h1>`
     }
     <canvas id="portrait" class="intro-creature" width="240" height="150" aria-hidden="true"></canvas>
-    <p>${first ? "Kill an enemy.<br>Choose your next body." : chamber.description}</p>
+    <p>${first ? "Dodge the swarm.<br>Stack wild upgrades." : chamber.description}</p>
     ${
       first
-        ? `<p class="intro-rule">One hit drops an enemy.<br>Each body has one attack.</p><p class="health-rule" title="${healthExplanation()}"><strong>3 hearts. At 0, the run ends.</strong><br>${touchControls ? "Get close. Tap SWITCH. Recover 1 life." : "Get close. E to switch. Recover 1 life."}</p>`
-        : `<p class="small-copy">${
-            SPECIES[getPlayer(run).species].name
-          } · ${healthAmount(run.core)}/${run.maxCore} life · ${
+        ? `<p class="intro-rule">Auto-fires where you aim.<br>Dash through bullets with Click or Space.</p><p class="health-rule" title="${healthExplanation()}"><strong>3 hearts. At 0, the run ends.</strong><br>Clear a chamber to heal 1 heart and pick an upgrade.</p>`
+        : `<p class="small-copy">${healthAmount(run.core)}/${run.maxCore} life · ${
             run.mutations.length
-          } ${run.mutations.length === 1 ? "mutation" : "mutations"}</p>`
+          } ${run.mutations.length === 1 ? "upgrade" : "upgrades"}</p>`
     }
     <button id="begin-button" class="primary-button" type="button">${
       restored
         ? "Resume from checkpoint"
         : first
-        ? "Find a way out"
+        ? "Start escape"
         : "Enter chamber"
     }</button>
     <p class="fine-print">${
       first
         ? touchControls
-          ? `Left thumb moves. Drag ${
-              SPECIES[getPlayer(run).species].action
-            } to aim; release to use it.`
-          : `WASD moves · mouse aims · click / Space: ${
-              SPECIES[getPlayer(run).species].action
-            }`
+          ? "Left thumb moves · auto-fires at foes · tap Dash to dodge"
+          : "WASD moves · mouse aims (auto-fires) · Click / Space to Dash"
         : "Progress saved. You can leave and return here."
     }</p>`);
   drawPortrait(getPlayer(run).species, first);
@@ -714,6 +688,7 @@ function renderReward() {
 
 function renderPause() {
   const conflict = store.status === "conflict";
+  const reason = !graphicsLost && !conflict ? pauseReason : "";
   const checkpointNote =
     run.resumePhase === "cleared"
       ? "Your current body and cleared chamber are saved here."
@@ -727,6 +702,7 @@ function renderPause() {
       ? "A newer run<br>is saved."
       : "Take a breath."
   }</h2>
+    ${reason ? '<p id="pause-reason" role="status"></p>' : ""}
     <p>${
       graphicsLost
         ? "The fight is paused while the picture recovers. You can also reload from your last checkpoint."
@@ -760,6 +736,7 @@ function renderPause() {
         : ""
     }
     <p class="fine-print">${checkpointNote}</p>`);
+  if (reason) element("pause-reason").textContent = reason;
   bind("resume-button", () => {
     if (conflict) location.reload();
     else begin();
@@ -781,12 +758,12 @@ function renderSettings() {
     }></label>
     <p class="small-copy">${
       touchControls
-        ? "Drag the left pad to move. Drag your attack to aim, then release. A shorter drag makes a shorter Pounce. Get close to a defeated body and tap SWITCH."
-        : "WASD / arrows: move. Mouse: aim. Left-click / Space: attack. Hold to repeat Spit; press again for each Ram or Pounce. Right-click / E: switch to the highlighted body, even during an attack. Escape: pause."
+        ? "Drag the left pad to move. You fire automatically at the nearest enemy. Tap Dash to dodge through bullets. Clear a chamber to heal 1 heart and pick an upgrade."
+        : "WASD / arrows: move. Mouse: aim (auto-fires toward your cursor). Left-click / Space / Shift: Dash through bullets. Clear a chamber to heal 1 heart and stack upgrades. Escape: pause."
     }</p>
-    <p class="fine-print">Enemies die in one hit. Kills leave bodies you can choose to use once. Clear the chamber, then leave through the opening above.</p>
+    <p class="fine-print">Clear all waves, then leave through the opening above to claim your next upgrade.</p>
     <p class="health-rule"><strong>Red hearts = life.</strong> ${healthExplanation()}<br>Dodge with the small ring at your center.</p>
-    <button id="close-settings" class="primary-button" type="button">Back to the body</button>`);
+    <button id="close-settings" class="primary-button" type="button">${recoveredResult ? "Back to body record" : "Back to the body"}</button>`);
   element<HTMLInputElement>("setting-sound").addEventListener(
     "change",
     (event) => {
@@ -865,10 +842,14 @@ function renderResult(result: RunResult) {
     </figure>
     <p class="result-summary">${result.counters.hops} ${
     result.counters.hops === 1 ? "switch" : "switches"
-  } · ${clock(result.activeTimeMs)} active</p>
+  } · ${clock(result.activeTimeMs)} active${
+    store.bestProgress > result.completedEncounters
+      ? `<br>Best: ${store.bestProgress}/${ENCOUNTER_COUNT} chambers cleared`
+      : ""
+  }</p>
     <p class="result-build">${mutations || "No mutations"}</p>
     <div class="result-actions">
-      <button id="retry-button" class="primary-button" type="button">Retry this escape</button>
+      <button id="retry-button" class="primary-button" type="button">${store.status === "conflict" ? "Reload saved run" : "Retry this escape"}</button>
       <button id="copy-result" class="text-button" type="button">Copy body record</button>
     </div>
     <div id="manual-copy" hidden><label for="result-copy-text">Select and copy your record</label><textarea id="result-copy-text" readonly rows="5"></textarea><button id="close-copy" class="text-button" type="button">Close</button></div>
@@ -940,11 +921,15 @@ function renderResult(result: RunResult) {
   }
   element("result-heading").focus({ preventScroll: true });
   bind("retry-button", () => {
+    if (store.status === "conflict") {
+      location.reload();
+      return;
+    }
     newAttempt();
     begin();
   });
   const postUrl = getPostUrl();
-  const record = `BODY HOP · ${run.challenge.date}\n${
+  const record = `MOLT · ${run.challenge.date}\n${
     escaped
       ? "Escaped all 6 chambers"
       : `Died in chamber ${result.completedEncounters + 1}`
@@ -1012,7 +997,10 @@ async function launch() {
     }
     run = loaded;
     restored = true;
-  } else newAttempt();
+  } else {
+    newAttempt();
+    recoveredResult = store.latestResult;
+  }
   connectGame();
 }
 
@@ -1027,8 +1015,8 @@ function connectGame() {
     '<div class="loading"><span class="little-worm"></span><p>Finding a body…</p><p class="loading-recovery">Taking a while? <a href="">Reload this game</a>.</p></div>';
   overlay.classList.remove("hidden");
   element("control-tip").innerHTML = touchControls
-    ? "Drag your attack to aim.<br>Tap to target a threat."
-    : "<span><kbd>WASD</kbd> move · mouse aim</span><span>Right-click / <kbd>E</kbd> switch</span>";
+    ? "Auto-fires at nearest foe.<br>Tap Dash to dodge bullets."
+    : "<span><kbd>WASD</kbd> move · mouse aims</span><span>Click / <kbd>Space</kbd> dash</span>";
   element(
     "challenge-label"
   ).textContent = `DAILY ESCAPE · ${store.bootstrap.challenge.date
@@ -1047,6 +1035,7 @@ function connectGame() {
     reducedMotion: () => reducedMotion,
     ready: (canvas) => {
       rendererReady = true;
+      delete document.body.dataset.loading;
       canvas.tabIndex = 0;
       canvas.setAttribute("aria-label", "Combat arena");
       canvas.addEventListener("webglcontextlost", (event) => {
@@ -1056,8 +1045,9 @@ function connectGame() {
       });
       canvas.addEventListener("webglcontextrestored", () => {
         graphicsLost = false;
+        if (run.phase === "paused")
+          pauseReason = "Graphics restored. Resume when you are ready.";
         updateUi(true);
-        hint("Graphics restored. Resume when you are ready.");
       });
       input = new GameInput(
         canvas,
@@ -1082,14 +1072,22 @@ function connectGame() {
     settingsOpen = true;
     updateUi(true);
   });
-  bind("sound-button", () => {
+  element("sound-button").addEventListener("click", (event) => {
     audio.setMuted(!audio.muted);
     savePreferences();
     updateHud();
     if (!audio.muted)
       void audio.unlock().catch(() => hint("Sound could not start."));
+    if (event.detail > 0 && (run.phase === "playing" || run.phase === "cleared"))
+      renderer?.game.canvas.focus({ preventScroll: true });
   });
   window.addEventListener("blur", () => pauseGame());
+  window.addEventListener("focus", () => {
+    if (getHostMode() === "inline") {
+      pauseGame();
+      audio.suspend();
+    }
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       pauseGame();

@@ -2,13 +2,17 @@ import type { GameEvent } from "../shared/types";
 export class GameAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
+  private effects: GainNode | null = null;
+  private priorityCue = false;
   private noiseBuffer: AudioBuffer | null = null;
   private lastPlayerBasic = -Infinity;
   private lastEnemyAttack = -Infinity;
   private lastEnemyHit = -Infinity;
   private lastEnemyDeath = -Infinity;
   private lastSurface = -Infinity;
+  private lastPlayerChargeSurface = -Infinity;
   private lastPatternTell = -Infinity;
+  private lastImpact = { player: -Infinity, enemy: -Infinity, echo: -Infinity };
   muted = false;
   async unlock() {
     this.context ??= new AudioContext();
@@ -16,8 +20,11 @@ export class GameAudio {
       this.master = this.context.createGain();
       this.master.gain.value = this.muted ? 0 : 0.38;
       this.master.connect(this.context.destination);
+      this.effects = this.context.createGain();
+      this.effects.connect(this.master);
     }
-    if (this.context.state === "suspended") await this.context.resume();
+    if (this.context.state === "suspended" || this.context.state === "interrupted")
+      await this.context.resume();
   }
   setMuted(muted: boolean) {
     this.muted = muted;
@@ -29,7 +36,31 @@ export class GameAudio {
       );
   }
   suspend() {
+    this.master?.disconnect();
+    this.master = null;
+    this.effects = null;
+    this.lastPlayerBasic = -Infinity;
+    this.lastEnemyAttack = -Infinity;
+    this.lastEnemyHit = -Infinity;
+    this.lastEnemyDeath = -Infinity;
+    this.lastSurface = -Infinity;
+    this.lastPlayerChargeSurface = -Infinity;
+    this.lastPatternTell = -Infinity;
+    this.lastImpact = { player: -Infinity, enemy: -Infinity, echo: -Infinity };
     void this.context?.suspend();
+  }
+  private duckEffects(duration: number) {
+    const ctx = this.context, gain = this.effects?.gain;
+    if (!ctx || !gain) return;
+    const now = ctx.currentTime;
+    if (typeof gain.cancelAndHoldAtTime === "function") gain.cancelAndHoldAtTime(now);
+    else {
+      const held = gain.value;
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(held, now);
+    }
+    gain.setTargetAtTime(0.28, now, 0.008);
+    gain.setTargetAtTime(1, now + duration, 0.045);
   }
   private tone(
     start: number,
@@ -40,8 +71,8 @@ export class GameAudio {
     delay = 0
   ) {
     const ctx = this.context,
-      master = this.master;
-    if (!ctx || !master || this.muted || ctx.state !== "running") return;
+      output = this.priorityCue ? this.master : this.effects;
+    if (!ctx || !output || this.muted || ctx.state !== "running") return;
     const at = ctx.currentTime + delay,
       osc = ctx.createOscillator(),
       gain = ctx.createGain();
@@ -55,9 +86,13 @@ export class GameAudio {
     gain.gain.exponentialRampToValueAtTime(volume, at + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.001, at + duration);
     osc.connect(gain);
-    gain.connect(master);
+    gain.connect(output);
     osc.start(at);
     osc.stop(at + duration + 0.02);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
   }
   private noise(
     duration: number,
@@ -68,8 +103,8 @@ export class GameAudio {
     attack = 0.003
   ) {
     const ctx = this.context,
-      master = this.master;
-    if (!ctx || !master || this.muted || ctx.state !== "running") return;
+      output = this.priorityCue ? this.master : this.effects;
+    if (!ctx || !output || this.muted || ctx.state !== "running") return;
     if (!this.noiseBuffer) {
       this.noiseBuffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
       const data = this.noiseBuffer.getChannelData(0);
@@ -95,7 +130,7 @@ export class GameAudio {
     gain.gain.linearRampToValueAtTime(0, at + duration);
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(master);
+    gain.connect(output);
     source.start(at, Math.random() * (1 - duration), duration);
     source.onended = () => {
       source.disconnect();
@@ -104,14 +139,33 @@ export class GameAudio {
     };
   }
   events(events: GameEvent[], playerId: number) {
+    if (!this.context || this.context.state !== "running" || this.muted) return;
+    const now = this.context.currentTime * 1000;
     const ownedSources = new Set([playerId]);
     for (const event of events)
       if (event.type === "possess") ownedSources.add(event.fromId);
+    const impacts = events.filter(event => event.type === "impact");
+    const impactSources = new Set(impacts.filter(event => event.kind !== "shock" && event.hitCount > 0).map(event => event.sourceId));
+    const damagedEnemies = new Set(events.flatMap(event =>
+      event.type === "damage" && event.faction === "enemy" ? [event.targetId] : []));
+    const selectedImpacts = new Map<string, Extract<GameEvent, { type: "impact" }>>();
+    for (const impact of impacts) {
+      const selected = selectedImpacts.get(impact.faction);
+      if (!selected || impact.hitCount > selected.hitCount)
+        selectedImpacts.set(impact.faction, impact);
+    }
+    const ringTell = now - this.lastPatternTell >= 300
+      ? events.find(event => event.type === "attack" && event.phase === "windup" && event.pattern?.kind === "ring")
+      : undefined;
+    const hurt = events.some(event => event.type === "damage" && event.faction === "player");
+    const possessed = events.some(event => event.type === "possess");
+    if (hurt || possessed || ringTell) this.duckEffects(ringTell ? 0.26 : 0.22);
     for (const event of events) {
+      this.priorityCue = event === ringTell || event.type === "possess" ||
+        (event.type === "damage" && event.faction === "player") || event.type === "result";
       if (event.type === "attack") {
-        const now = performance.now();
         if (event.phase !== "release") {
-          if (event.pattern?.kind === "ring" && now - this.lastPatternTell >= 300) {
+          if (event === ringTell) {
             this.lastPatternTell = now;
             this.tone(410, 440, 0.09, 0.028, "sine");
             this.tone(550, 610, 0.12, 0.025, "sine", 0.12);
@@ -163,9 +217,11 @@ export class GameAudio {
         }
       }
       if (event.type === "surface") {
-        const now = performance.now();
-        if (now - this.lastSurface < 70) continue;
-        this.lastSurface = now;
+        const playerCharge = event.faction === "player" && event.kind === "charge";
+        const lastSurface = playerCharge ? this.lastPlayerChargeSurface : this.lastSurface;
+        if (now - lastSurface < 70) continue;
+        if (playerCharge) this.lastPlayerChargeSurface = now;
+        else this.lastSurface = now;
         const volume =
           event.faction === "player"
             ? 1
@@ -197,7 +253,7 @@ export class GameAudio {
         this.noise(0.025, 0.08, 850, "bandpass", 0.085);
       }
       if (event.type === "damage" && event.faction === "enemy") {
-        const now = performance.now();
+        if (impactSources.has(event.sourceId)) continue;
         if (now - this.lastEnemyHit >= 45) {
           this.lastEnemyHit = now;
           const heavy = event.amount >= 3;
@@ -232,24 +288,30 @@ export class GameAudio {
         }
       }
       if (event.type === "death" && !event.player) {
-        const now = performance.now();
+        if (damagedEnemies.has(event.id)) continue;
         if (now - this.lastEnemyDeath < 40) continue;
         this.lastEnemyDeath = now;
         this.tone(170, 40, 0.11, 0.1);
         this.noise(0.09, 0.14, 1100);
       }
       if (event.type === "impact") {
+        if (selectedImpacts.get(event.faction) !== event) continue;
+        const interval = event.faction === "player" ? 65 : 110;
+        if (now - this.lastImpact[event.faction] < interval) continue;
+        this.lastImpact[event.faction] = now;
+        const volume = (event.faction === "player" ? 1 : event.faction === "echo" ? 0.7 : 0.3) *
+          (event.hitCount > 0 ? 1 : 0.28);
         if (event.kind === "charge") {
-          this.tone(175, 145, 0.05, 0.11, "triangle");
-          this.noise(0.07, 0.15, 1500);
-          this.tone(350, 320, 0.025, 0.035, "sine", 0.014);
+          this.tone(175, 145, 0.05, 0.11 * volume, "triangle");
+          this.noise(0.07, 0.15 * volume, 1500);
+          this.tone(350, 320, 0.025, 0.035 * volume, "sine", 0.014);
         } else if (event.kind === "leap") {
-          this.tone(95, 72, 0.065, 0.1, "triangle");
-          this.noise(0.06, 0.14, 950);
-          this.noise(0.018, 0.045, 1500, "bandpass", 0.018);
+          this.tone(95, 72, 0.065, 0.1 * volume, "triangle");
+          this.noise(0.06, 0.14 * volume, 950);
+          this.noise(0.018, 0.045 * volume, 1500, "bandpass", 0.018);
         } else {
-          this.tone(75, 60, 0.1, 0.11, "triangle");
-          this.noise(0.1, 0.13, 650);
+          this.tone(75, 60, 0.1, 0.11 * volume, "triangle");
+          this.noise(0.1, 0.13 * volume, 650);
         }
       }
       if (event.type === "encounterClear") {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BODY HOP</title>
+    <title>MOLT</title>
     <meta name="theme-color" content="#e7ddc5" />
     <style>
       * {
@@ -106,10 +106,13 @@
         display: block;
         padding: 18px;
       }
-      @media (max-height: 460px) {
+      @media (max-height: 480px) {
         .entry {
-          padding-top: 16px;
-          padding-bottom: 16px;
+          padding-top: 12px;
+          padding-bottom: 12px;
+        }
+        .eyebrow {
+          margin-bottom: 4px;
         }
         #splash-title {
           max-width: 320px;
@@ -119,10 +122,50 @@
         }
         .premise {
           font-size: 17px;
-          margin-bottom: 13px;
+          line-height: 1.25;
+          margin-bottom: 10px;
         }
         .detail {
-          margin-top: 13px;
+          margin-top: 10px;
+        }
+      }
+      @media (max-height: 400px) {
+        #splash-cast {
+          display: none;
+        }
+      }
+      @media (max-height: 400px) and (min-width: 520px) {
+        .entry {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+          column-gap: 20px;
+          align-content: center;
+          justify-items: center;
+        }
+        .eyebrow {
+          grid-area: 1 / 1;
+        }
+        #splash-title {
+          grid-area: 2 / 1;
+          max-width: 250px;
+        }
+        #splash-cast {
+          display: block;
+          grid-area: 3 / 1 / 6 / 2;
+          max-width: 260px;
+          margin: 0;
+        }
+        .premise {
+          grid-area: 1 / 2 / 3 / 3;
+        }
+        #play {
+          grid-area: 3 / 2;
+        }
+        .detail {
+          grid-area: 4 / 2;
+        }
+        #status {
+          grid-area: 5 / 2;
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -134,8 +177,8 @@
   </head>
   <body>
     <main class="entry">
-      <h1>BODY HOP</h1>
-      <p class="eyebrow">A DAILY PARASITE ESCAPE</p>
+      <h1>MOLT</h1>
+      <p class="eyebrow">A DAILY BULLET-HELL ESCAPE</p>
       <canvas
         id="splash-title"
         width="1020"
@@ -149,8 +192,8 @@
         aria-hidden="true"
       ></canvas>
       <p class="premise">
-        You’re the worm.<br /><strong
-          >Break a body. Wear what it can do.</strong
+        Dodge the swarm.<br /><strong
+          >Stack wild upgrades. Survive six chambers.</strong
         >
       </p>
       <button id="play" type="button">Play this escape</button>
@@ -160,7 +203,7 @@
       </p>
     </main>
     <noscript
-      >BODY HOP needs JavaScript to run. Open this post in the Reddit app or on
+      >MOLT needs JavaScript to run. Open this post in the Reddit app or on
       reddit.com.</noscript
     >
     <script type="module" src="./splash.ts"></script>

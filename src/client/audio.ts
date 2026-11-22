@@ -312,6 +312,13 @@ export class GameAudio {
         } else if (event.kind === "dash") {
           this.tone(240, 480, 0.085, 0.06, "sine");
           this.noise(0.11, 0.14, 1800, "bandpass");
+        } else if (event.kind === "graze") {
+          this.tone(620, 980, 0.09, 0.09, "sine");
+          this.tone(920, 1280, 0.11, 0.065, "triangle", 0.03);
+        } else if (event.kind === "spore") {
+          this.tone(130, 42, 0.22, 0.18, "triangle");
+          this.noise(0.24, 0.22, 520, "lowpass");
+          this.tone(320, 140, 0.12, 0.08, "sine", 0.02);
         } else {
           this.tone(75, 60, 0.1, 0.11 * volume, "triangle");
           this.noise(0.1, 0.13 * volume, 650);

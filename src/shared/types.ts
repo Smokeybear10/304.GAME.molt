@@ -20,7 +20,7 @@ export const CountersSchema = z.object({ kills: z.number().int().min(0).max(1000
 export type Counters = z.infer<typeof CountersSchema>;
 export const LineageEntrySchema = z.object({ species: SpeciesSchema, encounterIndex: z.number().int().min(0).max(5), atMs: z.number().finite().min(0).max(3600000) }).strict();
 export type LineageEntry = z.infer<typeof LineageEntrySchema>;
-const SlotsSchema = z.array(MutationIdSchema).max(5).refine(values => new Set(values).size === values.length);
+const SlotsSchema = z.array(MutationIdSchema).max(6).refine(values => new Set(values).size === values.length);
 export const EncounterRecordSchema = z.object({
   encounterIndex: z.number().int().min(0).max(5), entrySpecies: SpeciesSchema, entryMutations: SlotsSchema,
   startLineageIndex: z.number().int().min(0).max(95), combatEndLineageIndex: z.number().int().min(1).max(96).nullable(),
@@ -125,12 +125,13 @@ export type Projectile = {
   bounces?: number;
 };
 export type Area = { id: number; ownerId: number; kind: 'silk' | 'acid'; x: number; y: number; toX: number; toY: number; radius: number; remainingMs: number; tickMs: number; hitIds: number[] };
+export type Spore = { id: number; x: number; y: number; radius: number; alive: boolean };
 export type Spawn = { species: Species; x: number; y: number; elite?: boolean };
 export type Encounter = { name: string; description: string; start: Vec2; obstacles: Rect[]; enemies: Spawn[]; groups: Spawn[][] };
 export type Run = {
   challenge: Challenge; runId: string; healthModel: HealthModel; phase: Phase; resumePhase: 'ready' | 'playing' | 'cleared' | 'reward';
   encounterIndex: number; completedEncounters: number; core: number; maxCore: number; playerId: number;
-  actors: Actor[]; corpses: Corpse[]; projectiles: Projectile[]; areas: Area[]; obstacles: Rect[];
+  actors: Actor[]; corpses: Corpse[]; projectiles: Projectile[]; areas: Area[]; spores: Spore[]; obstacles: Rect[];
   silkTrail: { x: number; y: number; remainingMs: number; segmentId: number | null } | null;
   mutations: MutationId[]; rewardOffers: MutationId[]; activeTimeMs: number; encounterTimeMs: number;
   lineage: LineageEntry[]; encounterRecords: EncounterRecord[]; counters: Counters; nextEntityId: number; hopCooldownMs: number; lossCause: string; boundaryCheckpoint: Checkpoint | null;
@@ -142,7 +143,7 @@ export type GameEvent =
   | { type: 'death'; id: number; x: number; y: number; species: Species; player: boolean }
   | { type: 'corpse'; id: number; x: number; y: number; species: Species }
   | { type: 'possess'; fromId: number; toId: number; corpseId: number; abandonedCorpseId: number; fromX: number; fromY: number; x: number; y: number; species: Species; healed: number }
-  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock' | 'dash'; dirX?: number; dirY?: number }
+  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock' | 'dash' | 'graze' | 'spore'; dirX?: number; dirY?: number }
   | { type: 'surface'; sourceId: number; x: number; y: number; dirX: number; dirY: number; kind: 'spit' | 'charge'; material: 'bread' | 'ceramic'; faction: Actor['faction'] }
   | { type: 'mutation'; mutationId: MutationId; x: number; y: number }
   | { type: 'blocked'; action: 'hop'; reason: string }

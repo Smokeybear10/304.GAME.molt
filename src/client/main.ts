@@ -28,6 +28,7 @@ import {
   startEncounter,
   step,
   chooseMutation,
+  takeCursedPact,
   skipReward,
   pause,
   resume,
@@ -157,6 +158,11 @@ function dispatch(events: GameEvent[]) {
           ],
           { duration: 420, easing: "ease-out" }
         );
+    }
+    if (event.type === "impact" && event.kind === "graze") {
+      healthNotice = "GRAZE · Dash refunded + instant shot!";
+      healthNoticeKind = "heal";
+      healthNoticeUntil = performance.now() + 1400;
     }
     if (event.type === "encounterClear") {
       healthNotice = `Chamber cleared · ${healthAmount(run.core)}/${run.maxCore} life.`;
@@ -349,7 +355,7 @@ function updateHud() {
     element("life-group").classList.toggle("low-life", lowLife);
     element("life-warning").hidden = !lowLife;
     element("hud").dataset.lowLife = String(lowLife);
-    element("host-name").textContent = `${run.mutations.length} / 5`;
+    element("host-name").textContent = `${run.mutations.length} / 6`;
     element("health-note").title = healthExplanation();
     element("chamber-value").textContent = `${String(
       run.encounterIndex + 1
@@ -676,6 +682,11 @@ function renderReward() {
             .join("")}</div>`
         : ""
     }
+    ${
+      run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 6
+        ? `<button id="cursed-pact" class="text-button" type="button">Cursed Pact (-1 heart): also claim ${MUTATIONS[run.rewardOffers[0]!].name}</button>`
+        : ""
+    }
     <button id="skip-reward" class="text-button" type="button">${
       run.mutations.length
         ? "Keep my current upgrades"
@@ -685,7 +696,7 @@ function renderReward() {
   paintRewardSpecimens();
   run.rewardOffers.forEach((id, index) =>
     bind(`reward-${index}`, () => {
-      if (run.mutations.length >= 5) {
+      if (run.mutations.length >= 6) {
         replacement = id;
         updateUi(true);
         return;
@@ -694,6 +705,14 @@ function renderReward() {
       enterNextChamber();
     })
   );
+  if (run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 6) {
+    bind("cursed-pact", () => {
+      const offer = run.rewardOffers[0];
+      if (!offer) return;
+      dispatch(takeCursedPact(run, offer));
+      updateUi(true);
+    });
+  }
   bind("skip-reward", () => {
     dispatch(skipReward(run));
     enterNextChamber();

@@ -227,9 +227,18 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   player.shell = 0;
   player.specialCooldownMs = host.specialCooldownMs;
   player.basicCooldownMs = host.basicCooldownMs;
+  player.invulnerableMs = 600;
   player.lastSpecial = host.lastSpecial ? { ...host.lastSpecial } : null;
   run.playerId = player.id;
-  run.actors.push(player, ...encounter.groups[0]!.map(spawn => makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite)));
+  const opener = run.encounterIndex === 0;
+  const initialEnemies = encounter.groups[0]!.map((spawn, index) => {
+    const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
+    enemy.stunMs = opener ? 850 : 450;
+    enemy.basicCooldownMs = (opener ? 1400 : 1100) + index * 250;
+    enemy.specialCooldownMs = (opener ? 2100 : 1600) + index * 320;
+    return enemy;
+  });
+  run.actors.push(player, ...initialEnemies);
   run.phase = 'ready';
   run.resumePhase = 'ready';
 }
@@ -419,11 +428,15 @@ function projectile(run: Run, actor: Actor, dx: number, dy: number, amount: numb
 function enemyPattern(run: Run, actor: Actor, dx: number, dy: number, basic = false): BulletPattern {
   const room = run.encounterIndex;
   const ring = !basic && (actor.elite || (room > 0 && actor.volleyCount % 2 === 1));
-  const count = ring ? actor.elite ? 18 : room >= 3 ? 16 : 12 : basic ? room >= 3 ? 5 : 3 : room >= 4 ? 9 : room >= 2 ? 7 : 5;
+  const count = ring
+    ? actor.elite ? 18 : room >= 3 ? 16 : 12
+    : basic
+    ? room === 0 ? 1 : room >= 3 ? 5 : 3
+    : room === 0 ? 3 : room >= 4 ? 9 : room >= 2 ? 7 : 5;
   return {
     kind: ring ? 'ring' : 'fan', angle: Math.atan2(dy, dx), count,
     spread: ring ? Math.PI * 2 : (count - 1) * (basic ? 0.275 : 0.25),
-    speed: basic ? 230 + room * 11 : ring ? 240 + room * 8 : 220 + room * 12,
+    speed: basic ? 185 + room * 16 : ring ? 220 + room * 10 : 185 + room * 16,
     gap: ring ? 1.1 : 0,
   };
 }
@@ -436,6 +449,7 @@ function emitPattern(run: Run, actor: Actor, pattern: BulletPattern): void {
   const angularDistance = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
   for (let index = 0; index < pattern.count; index++) {
     const angle = pattern.kind === 'ring' ? pattern.angle + index * Math.PI * 2 / pattern.count
+      : pattern.count <= 1 ? pattern.angle
       : pattern.angle + (index / (pattern.count - 1) - 0.5) * pattern.spread;
     if (pattern.kind === 'ring' && angularDistance(angle, pattern.angle) < pattern.gap / 2) continue;
     const dx = Math.cos(angle), dy = Math.sin(angle);

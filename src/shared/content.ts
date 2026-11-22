@@ -53,8 +53,8 @@ export function createChallenge(date: string, seed = hashSeed(`${SEED_NAMESPACE}
 const GROUP_SIZES = [[2, 2, 2], [3, 3, 4], [4, 4, 4], [4, 5, 5], [5, 5, 6], [5, 6, 7]];
 const ENCOUNTERS: Omit<Encounter, 'groups'>[] = [
   { name: 'First chamber', description: 'Weave through the volley. Dash through bullets when cornered.', start: { x: 360, y: 760 }, obstacles: [], enemies: [
-    { species: 'beetle', x: 360, y: 620 }, { species: 'spitter', x: 180, y: 400 }, { species: 'hopper', x: 540, y: 570 }, { species: 'spitter', x: 540, y: 150 },
-    { species: 'hopper', x: 100, y: 570 }, { species: 'spitter', x: 620, y: 420 },
+    { species: 'beetle', x: 360, y: 420 }, { species: 'spitter', x: 180, y: 260 }, { species: 'hopper', x: 540, y: 360 }, { species: 'spitter', x: 540, y: 150 },
+    { species: 'hopper', x: 120, y: 380 }, { species: 'spitter', x: 600, y: 300 },
   ] },
   { name: 'Split chamber', description: 'Use the center pillar to break enemy fire.', start: { x: 360, y: 800 }, obstacles: [{ x: 280, y: 390, width: 160, height: 110 }], enemies: [
     { species: 'spitter', x: 150, y: 200 }, { species: 'spitter', x: 570, y: 200 }, { species: 'beetle', x: 140, y: 540 }, { species: 'hopper', x: 570, y: 530 }, { species: 'beetle', x: 360, y: 150 }, { species: 'spitter', x: 100, y: 100 }, { species: 'spitter', x: 620, y: 330 },

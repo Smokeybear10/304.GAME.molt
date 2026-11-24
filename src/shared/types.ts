@@ -5,7 +5,10 @@ export type Species = z.infer<typeof SpeciesSchema>;
 export const SpecialRecordSchema = z.object({ species: SpeciesSchema, dirX: z.number().finite().min(-1).max(1), dirY: z.number().finite().min(-1).max(1), aimDistance: z.number().finite().min(0).max(210).optional() }).strict();
 export const HealthModelSchema = z.enum(['shared', 'shell-core']);
 export type HealthModel = z.infer<typeof HealthModelSchema>;
-export const MutationIdSchema = z.enum(['echo-tissue', 'silk-trail', 'shock-molt', 'venom-sacs', 'split-glands', 'grave-bloom']);
+export const MutationIdSchema = z.enum([
+  'echo-tissue', 'silk-trail', 'shock-molt', 'venom-sacs', 'split-glands', 'grave-bloom',
+  'pierce-barbs', 'heavy-bile', 'orbital-shell', 'arc-nerve',
+]);
 export type MutationId = z.infer<typeof MutationIdSchema>;
 export type Phase = 'ready' | 'playing' | 'cleared' | 'paused' | 'reward' | 'dead' | 'escaped';
 export type Vec2 = { x: number; y: number };
@@ -20,7 +23,7 @@ export const CountersSchema = z.object({ kills: z.number().int().min(0).max(1000
 export type Counters = z.infer<typeof CountersSchema>;
 export const LineageEntrySchema = z.object({ species: SpeciesSchema, encounterIndex: z.number().int().min(0).max(5), atMs: z.number().finite().min(0).max(3600000) }).strict();
 export type LineageEntry = z.infer<typeof LineageEntrySchema>;
-const SlotsSchema = z.array(MutationIdSchema).max(6).refine(values => new Set(values).size === values.length);
+const SlotsSchema = z.array(MutationIdSchema).max(10).refine(values => new Set(values).size === values.length);
 export const EncounterRecordSchema = z.object({
   encounterIndex: z.number().int().min(0).max(5), entrySpecies: SpeciesSchema, entryMutations: SlotsSchema,
   startLineageIndex: z.number().int().min(0).max(95), combatEndLineageIndex: z.number().int().min(1).max(96).nullable(),
@@ -110,28 +113,30 @@ export type Action = {
   dirX: number; dirY: number; fromX: number; fromY: number; targetX: number; targetY: number;
   hitIds: number[]; generation: 0 | 1; pattern?: BulletPattern; aimDistance?: number;
 };
+export type EnemyVariant = 'normal' | 'splitter' | 'sniper' | 'mini';
 export type Actor = {
   id: number; species: Species; faction: 'player' | 'enemy' | 'echo';
   x: number; y: number; radius: number; hp: number; maxHp: number; shell: number; maxShell: number;
   facingX: number; facingY: number; basicCooldownMs: number; specialCooldownMs: number;
   invulnerableMs: number; stunMs: number; poisonMs: number; poisonTickMs: number; poisonOwnerId: number;
-  action: Action | null; lastSpecial: SpecialRecord | null; elite: boolean; volleyCount: number;
+  action: Action | null; lastSpecial: SpecialRecord | null; elite: boolean; variant?: EnemyVariant; volleyCount: number;
   navigation: { waypoint: Vec2; goal: Vec2; retreat: boolean } | null;
 };
 export type Corpse = z.infer<typeof CorpseSchema>;
 export type Projectile = {
   id: number; ownerId: number; faction: 'player' | 'enemy'; x: number; y: number; prevX: number; prevY: number;
   vx: number; vy: number; radius: number; damage: number; lifeMs: number; kind: 'spit' | 'barb'; generation: 0 | 1; poison: boolean;
-  bounces?: number;
+  bounces?: number; pierce?: boolean; hitIds?: number[]; heavy?: boolean;
 };
 export type Area = { id: number; ownerId: number; kind: 'silk' | 'acid'; x: number; y: number; toX: number; toY: number; radius: number; remainingMs: number; tickMs: number; hitIds: number[] };
 export type Spore = { id: number; x: number; y: number; radius: number; alive: boolean };
-export type Spawn = { species: Species; x: number; y: number; elite?: boolean };
+export type Pickup = { id: number; kind: 'heart'; x: number; y: number; radius: number; remainingMs: number };
+export type Spawn = { species: Species; x: number; y: number; elite?: boolean; variant?: EnemyVariant };
 export type Encounter = { name: string; description: string; start: Vec2; obstacles: Rect[]; enemies: Spawn[]; groups: Spawn[][] };
 export type Run = {
   challenge: Challenge; runId: string; healthModel: HealthModel; phase: Phase; resumePhase: 'ready' | 'playing' | 'cleared' | 'reward';
   encounterIndex: number; completedEncounters: number; core: number; maxCore: number; playerId: number;
-  actors: Actor[]; corpses: Corpse[]; projectiles: Projectile[]; areas: Area[]; spores: Spore[]; obstacles: Rect[];
+  actors: Actor[]; corpses: Corpse[]; projectiles: Projectile[]; areas: Area[]; spores: Spore[]; pickups: Pickup[]; obstacles: Rect[];
   silkTrail: { x: number; y: number; remainingMs: number; segmentId: number | null } | null;
   mutations: MutationId[]; rewardOffers: MutationId[]; activeTimeMs: number; encounterTimeMs: number;
   lineage: LineageEntry[]; encounterRecords: EncounterRecord[]; counters: Counters; nextEntityId: number; hopCooldownMs: number; lossCause: string; boundaryCheckpoint: Checkpoint | null;
@@ -143,7 +148,8 @@ export type GameEvent =
   | { type: 'death'; id: number; x: number; y: number; species: Species; player: boolean }
   | { type: 'corpse'; id: number; x: number; y: number; species: Species }
   | { type: 'possess'; fromId: number; toId: number; corpseId: number; abandonedCorpseId: number; fromX: number; fromY: number; x: number; y: number; species: Species; healed: number }
-  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock' | 'dash' | 'graze' | 'spore'; dirX?: number; dirY?: number }
+  | { type: 'impact'; sourceId: number; faction: Actor['faction']; hitCount: number; x: number; y: number; radius: number; kind: 'charge' | 'leap' | 'shock' | 'dash' | 'graze' | 'spore' | 'orbit' | 'heart'; dirX?: number; dirY?: number }
+  | { type: 'arc'; fromX: number; fromY: number; toX: number; toY: number }
   | { type: 'surface'; sourceId: number; x: number; y: number; dirX: number; dirY: number; kind: 'spit' | 'charge'; material: 'bread' | 'ceramic'; faction: Actor['faction'] }
   | { type: 'mutation'; mutationId: MutationId; x: number; y: number }
   | { type: 'blocked'; action: 'hop'; reason: string }

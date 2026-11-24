@@ -936,6 +936,10 @@ export function paintMutationSpecimen(
       "venom-sacs": [-32, -33, 35, 67],
       "split-glands": [4, -39, 38, 78],
       "grave-bloom": [-36, 3, 38, 40],
+      "pierce-barbs": [-26, -24, 52, 48],
+      "heavy-bile": [-24, -24, 48, 48],
+      "orbital-shell": [-28, -28, 56, 56],
+      "arc-nerve": [-24, -28, 48, 56],
     };
   const [x, y, w, h] = bounds[id];
   const scale = Math.min((width - 14) / w, (height - 14) / h);
@@ -1037,6 +1041,22 @@ export function paintMutationSpecimen(
     return { x, y };
   };
   drawMutationGrafts(canvasGraftPainter(ctx), [id], specimenPoint, 1);
+  if (id === "pierce-barbs") {
+    path(ctx, "M-22 14L18-16L8 4L20-2L-8 20Z", pale, edge, 2.2);
+    path(ctx, "M-14 6L12-12", "transparent", "#b84332", 2);
+  }
+  if (id === "heavy-bile") {
+    path(ctx, "M0-20C14-20 20-10 20 2C20 14 10 20 0 20C-12 20-20 12-20 0C-20-12-12-20 0-20Z", "#7d9c5a", edge, 2.4);
+    path(ctx, "M-6-10C-2-14 6-12 8-6C4-8-2-6-6-10Z", "#d9f0a3", "transparent", 0);
+  }
+  if (id === "orbital-shell") {
+    path(ctx, "M0-22A22 22 0 1 0 0 22A22 22 0 1 0 0-22Z", "transparent", edge, 1.8);
+    path(ctx, "M-22 0A7 7 0 1 0-8 0A7 7 0 1 0-22 0Z", "#8ef0b0", edge, 2);
+    path(ctx, "M8 0A7 7 0 1 0 22 0A7 7 0 1 0 8 0Z", "#8ef0b0", edge, 2);
+  }
+  if (id === "arc-nerve") {
+    path(ctx, "M4-24L-14 2L-2 2L-8 24L16-4L2-4Z", "#ffe066", edge, 2.2);
+  }
   ctx.restore();
 }
 

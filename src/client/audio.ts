@@ -294,6 +294,10 @@ export class GameAudio {
         this.tone(170, 40, 0.11, 0.1);
         this.noise(0.09, 0.14, 1100);
       }
+      if (event.type === "arc") {
+        this.tone(880, 1420, 0.055, 0.055, "sawtooth");
+        this.noise(0.04, 0.07, 2600, "highpass");
+      }
       if (event.type === "impact") {
         if (selectedImpacts.get(event.faction) !== event) continue;
         const interval = event.faction === "player" ? 65 : 110;
@@ -319,6 +323,11 @@ export class GameAudio {
           this.tone(130, 42, 0.22, 0.18, "triangle");
           this.noise(0.24, 0.22, 520, "lowpass");
           this.tone(320, 140, 0.12, 0.08, "sine", 0.02);
+        } else if (event.kind === "orbit") {
+          this.tone(520, 740, 0.055, 0.07, "triangle");
+        } else if (event.kind === "heart") {
+          this.tone(520, 660, 0.09, 0.09, "sine");
+          this.tone(660, 880, 0.12, 0.09, "sine", 0.06);
         } else {
           this.tone(75, 60, 0.1, 0.11 * volume, "triangle");
           this.noise(0.1, 0.13 * volume, 650);

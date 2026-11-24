@@ -165,6 +165,7 @@ export class BodyHopScene extends Phaser.Scene {
   private lastFrameTime: number | null = null;
   private hitstopMs = 0;
   private callouts: { text: Phaser.GameObjects.Text; life: number; max: number; vy: number }[] = [];
+  private arcs: { fromX: number; fromY: number; toX: number; toY: number; life: number; max: number }[] = [];
   constructor(private hooks: SceneHooks) {
     super("body-hop");
   }
@@ -661,6 +662,9 @@ export class BodyHopScene extends Phaser.Scene {
           departureAngle: oldImage?.rotation ?? 0,
         });
       }
+      if (event.type === "arc") {
+        this.arcs.push({ fromX: event.fromX, fromY: event.fromY, toX: event.toX, toY: event.toY, life: 170, max: 170 });
+      }
       if (event.type === "impact") {
         if (event.kind === "spore") {
           this.rings.push(
@@ -677,6 +681,15 @@ export class BodyHopScene extends Phaser.Scene {
         if (event.kind === "graze") {
           this.rings.push({ x: event.x, y: event.y, radius: event.radius, life: 240, max: 240, color: 0x8ef0b0 });
           this.spawnCallout(event.x, event.y - 26, "GRAZE!", "#9ff7c0");
+          continue;
+        }
+        if (event.kind === "orbit") {
+          this.rings.push({ x: event.x, y: event.y, radius: 24, life: 180, max: 180, color: 0x8ef0b0 });
+          continue;
+        }
+        if (event.kind === "heart") {
+          this.rings.push({ x: event.x, y: event.y, radius: 36, life: 260, max: 260, color: 0xe04f6b });
+          this.spawnCallout(event.x, event.y - 24, "+1 HEART", "#ff8fa3");
           continue;
         }
         const solidHit = event.faction === "player" && event.hitCount > 0;
@@ -1052,6 +1065,34 @@ export class BodyHopScene extends Phaser.Scene {
       marks.fillStyle(0xffc86b, 0.92).fillCircle(spore.x - 4, spore.y - 4, spore.radius * 0.42 + pulse * 0.3);
       marks.lineStyle(2, BLACK, 0.9).strokeCircle(spore.x, spore.y, spore.radius);
     }
+    for (const pickup of run.pickups) {
+      if (pickup.remainingMs < 2000 && Math.floor(pickup.remainingMs / 140) % 2 === 0) continue;
+      const bob = this.hooks.reducedMotion() ? 0 : Math.sin(this.elapsed * 0.009 + pickup.id) * 2.5;
+      const py = pickup.y + bob;
+      ground.fillStyle(BLACK, 0.2).fillEllipse(pickup.x, pickup.y + 11, 22, 10);
+      marks.fillStyle(0xe04f6b, 0.28).fillCircle(pickup.x, py, 16);
+      marks.fillStyle(0xc93654, 1).fillCircle(pickup.x - 4.5, py - 2.5, 6);
+      marks.fillStyle(0xc93654, 1).fillCircle(pickup.x + 4.5, py - 2.5, 6);
+      marks.fillTriangle(pickup.x - 10, py - 0.5, pickup.x + 10, py - 0.5, pickup.x, py + 11);
+      marks.fillStyle(0xffb3c1, 0.85).fillCircle(pickup.x - 4.5, py - 4, 2.2);
+    }
+    for (let i = this.arcs.length - 1; i >= 0; i--) {
+      const arc = this.arcs[i]!;
+      arc.life -= dt;
+      if (arc.life <= 0) {
+        this.arcs.splice(i, 1);
+        continue;
+      }
+      const alpha = arc.life / arc.max;
+      const midX = (arc.fromX + arc.toX) / 2 + (Math.random() - 0.5) * 18;
+      const midY = (arc.fromY + arc.toY) / 2 + (Math.random() - 0.5) * 18;
+      marks.lineStyle(4, 0xffe066, alpha * 0.65);
+      marks.lineBetween(arc.fromX, arc.fromY, midX, midY);
+      marks.lineBetween(midX, midY, arc.toX, arc.toY);
+      marks.lineStyle(1.8, 0xffffff, alpha);
+      marks.lineBetween(arc.fromX, arc.fromY, midX, midY);
+      marks.lineBetween(midX, midY, arc.toX, arc.toY);
+    }
     const input = this.hooks.getInput(),
       player = actors.find((actor) => actor.id === run.playerId)!;
     const aliveCorpses = new Set<number>();
@@ -1354,6 +1395,23 @@ export class BodyHopScene extends Phaser.Scene {
           marks.fillStyle(0xffd275, 0.9);
           marks.fillCircle(visual.x + perpX * (actor.radius + 3), visual.y + perpY * (actor.radius + 3), 3.5);
           marks.fillCircle(visual.x - perpX * (actor.radius + 3), visual.y - perpY * (actor.radius + 3), 3.5);
+        }
+        if (muts.includes("orbital-shell")) {
+          const orbitRadius = actor.radius + 28;
+          for (let i = 0; i < 2; i++) {
+            const angle = run.activeTimeMs * 0.0042 + i * Math.PI;
+            const ox = visual.x + Math.cos(angle) * orbitRadius;
+            const oy = visual.y + Math.sin(angle) * orbitRadius;
+            marks.fillStyle(0x8ef0b0, 0.88).fillCircle(ox, oy, 8);
+            marks.lineStyle(2, BLACK, 0.9).strokeCircle(ox, oy, 8);
+          }
+        }
+      }
+      if (actor.faction === "enemy" && actor.hp > 0) {
+        if (actor.variant === "splitter") {
+          marks.lineStyle(2, 0xffb74d, 0.72).strokeCircle(visual.x, visual.y, actor.radius + 5);
+        } else if (actor.variant === "sniper") {
+          marks.lineStyle(2, 0xe04f6b, 0.72).strokeCircle(visual.x, visual.y, actor.radius + 4);
         }
       }
       if (actor.faction === "player" && actor.action?.kind === "dash") {

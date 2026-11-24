@@ -1,5 +1,5 @@
 import { CheckpointSchema } from './types.ts';
-import type { Actor, BulletPattern, Checkpoint, Challenge, Corpse, GameEvent, HealthModel, InputFrame, MutationId, Rect, Run, RunResult, Species, Spore, Vec2 } from './types.ts';
+import type { Actor, BulletPattern, Checkpoint, Challenge, Corpse, EnemyVariant, GameEvent, HealthModel, InputFrame, MutationId, Rect, Run, RunResult, Species, Spore, Vec2 } from './types.ts';
 import { BODY_SWITCH_COOLDOWN_MS, BOSS_HP, CHARGE_DURATION_MS, CHARGE_SPEED, CONTENT_VERSION, DASH_COOLDOWN_MS, DASH_DURATION_MS, DASH_INVULNERABLE_MS, DASH_SPEED, ENCOUNTER_COUNT, ENEMY_WALK_SPEED_SCALE, EXIT_RADIUS, LEAP_DISTANCE, LEAP_RADIUS, MAX_ENEMY_PROJECTILES, MAX_PROJECTILES, PLAYER_BULLET_RADIUS, PLAYER_LEAP_BASE_MS, PLAYER_LEAP_RANGE_MS, PLAYER_MELEE_WINDUP_MS, PLAYER_SPIT_SPEED, PLAYER_SPIT_WINDUP_MS, POSSESSION_CLEAR_RADIUS, SPECIES, TICK_MS, WORLD_HEIGHT, WORLD_WIDTH, getEncounter, getRewardOffers } from './content.ts';
 
 export const EMPTY_INPUT: InputFrame = { moveX: 0, moveY: 0, aimX: 0, aimY: -1, attackHeld: false, abilityPressed: false, assistedBasic: true, hopHeld: false, hopCommitId: null, hopCancelled: false, dashPressed: false };
@@ -198,17 +198,18 @@ function displace(run: Run, actor: Actor, dx: number, dy: number): void {
   for (let index = 0; index < steps; index += 1) moveActor(run, actor, dx / steps, dy / steps);
 }
 
-function makeActor(run: Run, species: Species, faction: Actor['faction'], x: number, y: number, elite = false): Actor {
+function makeActor(run: Run, species: Species, faction: Actor['faction'], x: number, y: number, elite = false, variant: EnemyVariant = 'normal'): Actor {
   const definition = SPECIES[species];
-  const hp = faction === 'enemy' ? (elite ? BOSS_HP : definition.enemyHp) : run.core;
-  const point = fitPosition(run, x, y, definition.radius * (elite ? 1.2 : 1));
+  const hp = faction === 'enemy' ? (elite ? BOSS_HP : variant === 'mini' ? 1 : definition.enemyHp) : run.core;
+  const radius = Math.round(definition.radius * (elite ? 1.2 : variant === 'mini' ? 0.68 : 1));
+  const point = fitPosition(run, x, y, radius);
   return {
-    id: run.nextEntityId++, species, faction, ...point, radius: definition.radius * (elite ? 1.2 : 1), hp, maxHp: faction === 'enemy' ? hp : run.maxCore,
+    id: run.nextEntityId++, species, faction, ...point, radius, hp, maxHp: faction === 'enemy' ? hp : run.maxCore,
     shell: 0, maxShell: 0,
     facingX: 0, facingY: faction === 'enemy' ? 1 : -1,
     basicCooldownMs: faction === 'enemy' ? 700 : 0, specialCooldownMs: faction === 'enemy' ? 1100 + run.nextEntityId % 4 * 180 : 0,
     invulnerableMs: 0, stunMs: 0, poisonMs: 0, poisonTickMs: 0, poisonOwnerId: 0,
-    action: null, lastSpecial: null, elite, volleyCount: 0, navigation: null,
+    action: null, lastSpecial: null, elite, variant, volleyCount: 0, navigation: null,
   };
 }
 
@@ -224,6 +225,7 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   run.projectiles = [];
   run.areas = [];
   run.spores = [];
+  run.pickups = [];
   run.silkTrail = null;
   run.encounterTimeMs = 0;
   run.encounterGroup = 0;
@@ -246,7 +248,7 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
     }
   }
   const initialEnemies = encounter.groups[0]!.map((spawn, index) => {
-    const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
+    const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite, spawn.variant);
     enemy.basicCooldownMs = 1500 + index * 280;
     enemy.specialCooldownMs = 2200 + index * 350;
     return enemy;
@@ -290,7 +292,7 @@ export function createRun(challenge: Challenge, _healthModel: HealthModel = 'sha
   const maxCore = 3;
   const run: Run = {
     challenge: { ...challenge }, runId, healthModel: 'shared', phase: 'ready', resumePhase: 'ready', encounterIndex: 0, completedEncounters: 0,
-    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], spores: [], silkTrail: null, obstacles: [], mutations: [], rewardOffers: [],
+    core: maxCore, maxCore, playerId: 0, actors: [], corpses: [], projectiles: [], areas: [], spores: [], pickups: [], silkTrail: null, obstacles: [], mutations: [], rewardOffers: [],
     activeTimeMs: 0, encounterTimeMs: 0, lineage: [{ species: 'spitter', encounterIndex: 0, atMs: 0 }], encounterRecords: [],
     counters: { kills: 0, hops: 0, specials: 0, damageTaken: 0 }, nextEntityId: 1, hopCooldownMs: 0, lossCause: '', boundaryCheckpoint: null, encounterGroup: 0, exit: { x: WORLD_WIDTH / 2, y: 72 },
   };
@@ -361,7 +363,7 @@ function advanceEncounter(run: Run): void {
 }
 export function chooseMutation(run: Run, offerId: MutationId, replaceSlot: 0 | 1 | null = null): GameEvent[] {
   if (run.phase !== 'reward' || !run.rewardOffers.includes(offerId) || run.mutations.includes(offerId)) return [];
-  if (run.mutations.length < 6) run.mutations.push(offerId);
+  if (run.mutations.length < 10) run.mutations.push(offerId);
   else if (replaceSlot === 0 || replaceSlot === 1) run.mutations[replaceSlot] = offerId;
   else return [];
   const player = getPlayer(run);
@@ -371,7 +373,7 @@ export function chooseMutation(run: Run, offerId: MutationId, replaceSlot: 0 | 1
 }
 export function takeCursedPact(run: Run, offerId: MutationId): GameEvent[] {
   if (run.phase !== 'reward' || run.encounterIndex !== 2 || run.core <= 1) return [];
-  if (!run.rewardOffers.includes(offerId) || run.mutations.includes(offerId) || run.mutations.length >= 6) return [];
+  if (!run.rewardOffers.includes(offerId) || run.mutations.includes(offerId) || run.mutations.length >= 10) return [];
   run.core -= 1;
   const player = getPlayer(run);
   player.hp = run.core;
@@ -430,6 +432,22 @@ function damage(run: Run, target: Actor, amount: number, sourceId: number, gener
   events.push({ type: 'death', id: target.id, x: target.x, y: target.y, species: target.species, player: target.faction === 'player' });
   if (target.faction === 'player') { recordCombatEnd(run, 'failed'); run.phase = 'dead'; run.silkTrail = null; run.lossCause = cause; return true; }
   run.counters.kills += 1;
+  if (target.variant === 'splitter' && run.actors.length < 28) {
+    for (const side of [-26, 26]) {
+      const mini = makeActor(run, 'hopper', 'enemy', target.x + side, target.y, false, 'mini');
+      mini.basicCooldownMs = 900;
+      mini.specialCooldownMs = 1500;
+      run.actors.push(mini);
+    }
+  }
+  if (
+    run.core < run.maxCore &&
+    run.pickups.length < 3 &&
+    target.variant !== 'mini' &&
+    (target.species === 'beetle' || target.elite || run.counters.kills % 5 === 0)
+  ) {
+    run.pickups.push({ id: run.nextEntityId++, kind: 'heart', x: target.x, y: target.y, radius: 16, remainingMs: 9500 });
+  }
   if (generation === 0 && has(run, 'grave-bloom') && run.areas.length < 32) {
     run.areas.push({ id: run.nextEntityId++, ownerId: sourceId, kind: 'acid', x: target.x, y: target.y, toX: target.x, toY: target.y, radius: 75, remainingMs: 2600, tickMs: 0, hitIds: [] });
     events.push({ type: 'mutation', mutationId: 'grave-bloom', x: target.x, y: target.y });
@@ -441,16 +459,25 @@ function projectile(run: Run, actor: Actor, dx: number, dy: number, amount: numb
   if (run.projectiles.length >= MAX_PROJECTILES) return;
   if (actor.faction === 'enemy' && run.projectiles.filter(shot => shot.faction === 'enemy').length >= MAX_ENEMY_PROJECTILES) return;
   const isPlayer = actor.faction !== 'enemy';
+  const heavy = isPlayer && has(run, 'heavy-bile');
+  const pierce = isPlayer && has(run, 'pierce-barbs');
   const speed = patternSpeed ?? (isPlayer ? PLAYER_SPIT_SPEED * (has(run, 'echo-tissue') ? 1.22 : 1) : 260);
   const x = actor.x + dx * (actor.radius + 7);
   const y = actor.y + dy * (actor.radius + 7);
   run.projectiles.push({ id: run.nextEntityId++, ownerId: actor.id, faction: isPlayer ? 'player' : 'enemy', x, y, prevX: x, prevY: y,
-    vx: dx * speed, vy: dy * speed, radius: kind === 'barb' ? 6 : 8, damage: amount, lifeMs: isPlayer ? 2000 : 3400, kind, generation,
-    poison: false, bounces: isPlayer && has(run, 'silk-trail') ? 1 : 0 });
+    vx: dx * speed, vy: dy * speed, radius: heavy ? 13 : kind === 'barb' ? 6 : 8, damage: heavy ? Math.max(amount, 2) : amount,
+    lifeMs: isPlayer ? 2000 : 3400, kind: pierce ? 'barb' : kind, generation,
+    poison: false, bounces: isPlayer && has(run, 'silk-trail') ? 1 : 0, pierce, hitIds: pierce ? [] : undefined, heavy });
 }
 
 function enemyPattern(run: Run, actor: Actor, dx: number, dy: number, basic = false): BulletPattern {
   const pace = paceScale(run);
+  if (actor.variant === 'sniper') {
+    return {
+      kind: 'fan', angle: Math.atan2(dy, dx), count: 2, spread: 0.08,
+      speed: Math.round(375 * pace), gap: 0,
+    };
+  }
   const minutes = run.activeTimeMs / 60000;
   const ring = !basic && (actor.elite || (minutes > 0.35 && actor.volleyCount % 2 === 1));
   const count = ring
@@ -759,7 +786,7 @@ function moveEnemy(run: Run, actor: Actor, dx: number, dy: number, dt: number, r
   const desired = direction(dx, dy), player = getPlayer(run);
   const goal = retreat ? fitPosition(run, actor.x + desired.x * 180, actor.y + desired.y * 180, actor.radius)
     : fitPosition(run, player.x, player.y, actor.radius);
-  const travel = SPECIES[actor.species].speed * ENEMY_WALK_SPEED_SCALE * paceScale(run) * dt / 1000;
+  const travel = SPECIES[actor.species].speed * ENEMY_WALK_SPEED_SCALE * (actor.variant === 'mini' ? 1.28 : 1) * paceScale(run) * dt / 1000;
   let target = goal;
   if (canWalkTo(run, actor, actor, goal)) actor.navigation = null;
   else {
@@ -875,16 +902,27 @@ function updateProjectiles(run: Run, dt: number, events: GameEvent[]): void {
         continue;
       }
     }
-    const possible = shot.faction === 'enemy' ? [getPlayer(run)] : run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0);
+    const possible = shot.faction === 'enemy' ? [getPlayer(run)] : run.actors.filter(actor => actor.faction === 'enemy' && actor.hp > 0 && !shot.hitIds?.includes(actor.id));
     const hit = possible.filter(actor => !(actor.action?.kind === 'leap' && actor.action.stage === 'active') && segmentDistance(actor, start, shot) < (actor.faction === 'player' && shot.faction === 'enemy' ? PLAYER_BULLET_RADIUS : actor.radius) + shot.radius)
       .sort((a, b) => distance(start, a) - distance(start, b) || a.id - b.id)[0];
     if (!hit) continue;
     damage(run, hit, shot.damage, shot.ownerId, shot.generation, shot.poison, shot.kind === 'barb' ? 'A barb struck your exposed body.' : 'A spit struck your exposed body.', events);
     if (shot.faction === 'player' && hit.hp > 0) {
       const push = direction(shot.vx, shot.vy);
-      displace(run, hit, push.x * (hit.elite ? 8 : 22), push.y * (hit.elite ? 8 : 22));
+      const force = hit.elite ? (shot.heavy ? 14 : 8) : (shot.heavy ? 34 : 22);
+      displace(run, hit, push.x * force, push.y * force);
     }
-    shot.lifeMs = 0;
+    if (shot.faction === 'player' && has(run, 'arc-nerve')) {
+      const arcTarget = run.actors
+        .filter(actor => actor.faction === 'enemy' && actor.hp > 0 && actor.id !== hit.id && distance(hit, actor) <= 175)
+        .sort((a, b) => distance(hit, a) - distance(hit, b))[0];
+      if (arcTarget) {
+        damage(run, arcTarget, 1, shot.ownerId, 1, false, '', events);
+        events.push({ type: 'arc', fromX: hit.x, fromY: hit.y, toX: arcTarget.x, toY: arcTarget.y });
+      }
+    }
+    if (shot.pierce && shot.hitIds) shot.hitIds.push(hit.id);
+    else shot.lifeMs = 0;
   }
   run.projectiles = run.projectiles.filter(shot => shot.lifeMs > 0);
 }
@@ -962,6 +1000,7 @@ function finishEncounter(run: Run, events: GameEvent[]): void {
   run.projectiles = [];
   run.areas = [];
   run.spores = [];
+  run.pickups = [];
   run.silkTrail = null;
   const player = getPlayer(run);
   if (run.core < run.maxCore) {
@@ -999,7 +1038,7 @@ function spawnNextGroup(run: Run, events: GameEvent[]): void {
   const player = getPlayer(run);
   const ids: number[] = [];
   for (const [index, spawn] of encounter.groups[run.encounterGroup]!.entries()) {
-    const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite);
+    const enemy = makeActor(run, spawn.species, 'enemy', spawn.x, spawn.y, spawn.elite, spawn.variant);
     const onLethalFloor = (point: Vec2) => enemy.elite && run.areas.some(area => area.remainingMs > 0 && (area.kind === 'silk'
       ? segmentDistance(point, area, { x: area.toX, y: area.toY }) <= area.radius + enemy.radius
       : distance(point, area) <= area.radius + enemy.radius * 0.4));
@@ -1091,6 +1130,39 @@ function stepCleared(run: Run, input: InputFrame, elapsed: number): GameEvent[] 
   return events;
 }
 
+function updateOrbitals(run: Run, events: GameEvent[]): void {
+  if (!has(run, 'orbital-shell')) return;
+  const player = getPlayer(run);
+  if (player.hp <= 0) return;
+  const orbitRadius = player.radius + 28;
+  for (let i = 0; i < 2; i++) {
+    const angle = run.activeTimeMs * 0.0042 + i * Math.PI;
+    const ox = player.x + Math.cos(angle) * orbitRadius;
+    const oy = player.y + Math.sin(angle) * orbitRadius;
+    const blocked = run.projectiles.filter(shot => shot.faction === 'enemy' && distance(shot, { x: ox, y: oy }) <= 18 + shot.radius);
+    if (blocked.length > 0) {
+      const ids = new Set(blocked.map(s => s.id));
+      run.projectiles = run.projectiles.filter(s => !ids.has(s.id));
+      events.push({ type: 'impact', sourceId: player.id, faction: 'player', hitCount: blocked.length, x: ox, y: oy, radius: 22, kind: 'orbit' });
+    }
+  }
+}
+
+function updatePickups(run: Run, dt: number, events: GameEvent[]): void {
+  const player = getPlayer(run);
+  for (const pickup of run.pickups) {
+    pickup.remainingMs -= dt;
+    if (pickup.remainingMs <= 0) continue;
+    if (run.core < run.maxCore && distance(player, pickup) <= player.radius + pickup.radius + 6) {
+      run.core = Math.min(run.maxCore, run.core + 1);
+      player.hp = run.core;
+      pickup.remainingMs = 0;
+      events.push({ type: 'impact', sourceId: player.id, faction: 'player', hitCount: 1, x: pickup.x, y: pickup.y, radius: 34, kind: 'heart' });
+    }
+  }
+  run.pickups = run.pickups.filter(pickup => pickup.remainingMs > 0);
+}
+
 export function step(run: Run, input: InputFrame, dtMs = TICK_MS): GameEvent[] {
   if (!Number.isFinite(dtMs) || dtMs <= 0) return [];
   if (run.phase === 'cleared') return stepCleared(run, input, Math.min(dtMs, TICK_MS));
@@ -1131,9 +1203,11 @@ export function step(run: Run, input: InputFrame, dtMs = TICK_MS): GameEvent[] {
   }
   if (run.phase === 'playing') {
     separateActors(run);
+    updateOrbitals(run, events);
     updateSilkTrail(run, dt, wasAirborne);
     updateProjectiles(run, dt, events);
     if (run.phase === 'playing') updateAreas(run, dt, events);
+    if (run.phase === 'playing') updatePickups(run, dt, events);
   }
   run.actors = run.actors.filter(actor => actor.faction === 'player' || (actor.hp > 0 && (actor.faction !== 'echo' || actor.action !== null)));
   if (run.phase === 'playing') {

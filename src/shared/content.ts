@@ -1,6 +1,6 @@
 import type { Challenge, Encounter, MutationId, RunResult, Species } from './types.ts';
 
-export const CONTENT_VERSION = 'body-hop-v8';
+export const CONTENT_VERSION = 'body-hop-v9';
 const SEED_NAMESPACE = 'body-hop-v2';
 export const ENCOUNTER_COUNT = 6;
 export const WORLD_WIDTH = 720;
@@ -40,6 +40,10 @@ export const MUTATIONS: Record<MutationId, { name: string; description: string; 
   'silk-trail': { name: 'Ricochet', description: 'Your shots bounce off walls and pillars once.', morphology: 'Elastic filaments coat every projectile.' },
   'grave-bloom': { name: 'Acid Burst', description: 'Kills leave a toxic acid pool that melts nearby enemies.', morphology: 'Fungal spores burst open on every kill.' },
   'shock-molt': { name: 'Shock Dash', description: 'Dashing clears nearby enemy bullets and knocks enemies back.', morphology: 'Hardened plates snap outward when you dash.' },
+  'pierce-barbs': { name: 'Piercing Shots', description: 'Your shots tear straight through enemies.', morphology: 'Needle barbs harden every projectile.' },
+  'heavy-bile': { name: 'Heavy Shots', description: 'Huge high-impact shots deal double damage with heavy knockback.', morphology: 'Dense sacs compress every volley.' },
+  'orbital-shell': { name: 'Orbital Shield', description: 'Two glowing shield orbs orbit you, blocking enemy bullets.', morphology: 'Detached shell satellites circle the host.' },
+  'arc-nerve': { name: 'Chain Lightning', description: 'Hits arc a bolt of lightning to a nearby enemy for bonus damage.', morphology: 'Charged filaments spark across the shell.' },
 };
 export const MUTATION_IDS = Object.keys(MUTATIONS) as MutationId[];
 export function hashSeed(value: string): number {
@@ -57,24 +61,24 @@ const ENCOUNTERS: Omit<Encounter, 'groups'>[] = [
     { species: 'hopper', x: 120, y: 380 }, { species: 'spitter', x: 600, y: 300 },
   ] },
   { name: 'Split chamber', description: 'Use the center pillar to break enemy fire.', start: { x: 360, y: 800 }, obstacles: [{ x: 280, y: 390, width: 160, height: 110 }], enemies: [
-    { species: 'spitter', x: 150, y: 200 }, { species: 'spitter', x: 570, y: 200 }, { species: 'beetle', x: 140, y: 540 }, { species: 'hopper', x: 570, y: 530 }, { species: 'beetle', x: 360, y: 150 }, { species: 'spitter', x: 100, y: 100 }, { species: 'spitter', x: 620, y: 330 },
-    { species: 'hopper', x: 100, y: 730 }, { species: 'hopper', x: 620, y: 720 }, { species: 'spitter', x: 360, y: 80 },
+    { species: 'spitter', x: 150, y: 200 }, { species: 'spitter', x: 570, y: 200, variant: 'sniper' }, { species: 'beetle', x: 140, y: 540, variant: 'splitter' }, { species: 'hopper', x: 570, y: 530 }, { species: 'beetle', x: 360, y: 150 }, { species: 'spitter', x: 100, y: 100 }, { species: 'spitter', x: 620, y: 330 },
+    { species: 'hopper', x: 100, y: 730 }, { species: 'hopper', x: 620, y: 720 }, { species: 'spitter', x: 360, y: 80, variant: 'sniper' },
   ] },
   { name: 'The charge lane', description: 'Dodge the beetle charges and control the center lane.', start: { x: 360, y: 800 }, obstacles: [{ x: 180, y: 330, width: 90, height: 180 }, { x: 450, y: 330, width: 90, height: 180 }], enemies: [
-    { species: 'spitter', x: 140, y: 650 }, { species: 'spitter', x: 580, y: 650 }, { species: 'beetle', x: 360, y: 180 }, { species: 'hopper', x: 130, y: 200 }, { species: 'hopper', x: 590, y: 200 }, { species: 'spitter', x: 360, y: 100 }, { species: 'spitter', x: 100, y: 350 }, { species: 'spitter', x: 620, y: 350 },
-    { species: 'spitter', x: 360, y: 620 }, { species: 'hopper', x: 100, y: 780 }, { species: 'hopper', x: 620, y: 780 }, { species: 'beetle', x: 360, y: 310 },
+    { species: 'spitter', x: 140, y: 650, variant: 'sniper' }, { species: 'spitter', x: 580, y: 650 }, { species: 'beetle', x: 360, y: 180, variant: 'splitter' }, { species: 'hopper', x: 130, y: 200 }, { species: 'hopper', x: 590, y: 200 }, { species: 'spitter', x: 360, y: 100, variant: 'sniper' }, { species: 'spitter', x: 100, y: 350 }, { species: 'spitter', x: 620, y: 350 },
+    { species: 'spitter', x: 360, y: 620 }, { species: 'hopper', x: 100, y: 780 }, { species: 'hopper', x: 620, y: 780 }, { species: 'beetle', x: 360, y: 310, variant: 'splitter' },
   ] },
   { name: 'Bone garden', description: 'Keep moving as crossfire tightens between the pillars.', start: { x: 360, y: 800 }, obstacles: [{ x: 180, y: 320, width: 90, height: 220 }, { x: 450, y: 320, width: 90, height: 220 }], enemies: [
-    { species: 'beetle', x: 360, y: 230 }, { species: 'spitter', x: 100, y: 160 }, { species: 'spitter', x: 620, y: 160 }, { species: 'beetle', x: 350, y: 560 }, { species: 'hopper', x: 590, y: 630 }, { species: 'hopper', x: 130, y: 630 }, { species: 'spitter', x: 360, y: 100 }, { species: 'spitter', x: 100, y: 410 }, { species: 'spitter', x: 620, y: 410 },
-    { species: 'spitter', x: 100, y: 700 }, { species: 'spitter', x: 620, y: 700 }, { species: 'hopper', x: 360, y: 650 }, { species: 'hopper', x: 360, y: 150 }, { species: 'beetle', x: 360, y: 400 },
+    { species: 'beetle', x: 360, y: 230, variant: 'splitter' }, { species: 'spitter', x: 100, y: 160, variant: 'sniper' }, { species: 'spitter', x: 620, y: 160, variant: 'sniper' }, { species: 'beetle', x: 350, y: 560 }, { species: 'hopper', x: 590, y: 630 }, { species: 'hopper', x: 130, y: 630 }, { species: 'spitter', x: 360, y: 100 }, { species: 'spitter', x: 100, y: 410 }, { species: 'spitter', x: 620, y: 410 },
+    { species: 'spitter', x: 100, y: 700, variant: 'sniper' }, { species: 'spitter', x: 620, y: 700 }, { species: 'hopper', x: 360, y: 650 }, { species: 'hopper', x: 360, y: 150 }, { species: 'beetle', x: 360, y: 400, variant: 'splitter' },
   ] },
   { name: 'Molt furnace', description: 'Dense waves from every angle. Clear a lane and stay mobile.', start: { x: 360, y: 800 }, obstacles: [{ x: 285, y: 330, width: 150, height: 130 }], enemies: [
-    { species: 'spitter', x: 100, y: 170 }, { species: 'spitter', x: 620, y: 170 }, { species: 'beetle', x: 180, y: 320 }, { species: 'beetle', x: 540, y: 320 }, { species: 'hopper', x: 140, y: 630 }, { species: 'hopper', x: 580, y: 630 }, { species: 'hopper', x: 360, y: 150 }, { species: 'spitter', x: 360, y: 580 }, { species: 'spitter', x: 100, y: 450 }, { species: 'spitter', x: 620, y: 450 },
-    { species: 'spitter', x: 100, y: 720 }, { species: 'spitter', x: 620, y: 720 }, { species: 'hopper', x: 240, y: 680 }, { species: 'hopper', x: 480, y: 680 }, { species: 'beetle', x: 360, y: 560 }, { species: 'spitter', x: 360, y: 100 },
+    { species: 'spitter', x: 100, y: 170, variant: 'sniper' }, { species: 'spitter', x: 620, y: 170, variant: 'sniper' }, { species: 'beetle', x: 180, y: 320, variant: 'splitter' }, { species: 'beetle', x: 540, y: 320 }, { species: 'hopper', x: 140, y: 630 }, { species: 'hopper', x: 580, y: 630 }, { species: 'hopper', x: 360, y: 150 }, { species: 'spitter', x: 360, y: 580 }, { species: 'spitter', x: 100, y: 450 }, { species: 'spitter', x: 620, y: 450 },
+    { species: 'spitter', x: 100, y: 720, variant: 'sniper' }, { species: 'spitter', x: 620, y: 720 }, { species: 'hopper', x: 240, y: 680 }, { species: 'hopper', x: 480, y: 680 }, { species: 'beetle', x: 360, y: 560, variant: 'splitter' }, { species: 'spitter', x: 360, y: 100 },
   ] },
   { name: 'The keeper', description: 'The keeper and its brood fill the room with fire. Break its armor to escape.', start: { x: 360, y: 810 }, obstacles: [{ x: 130, y: 390, width: 100, height: 120 }, { x: 490, y: 390, width: 100, height: 120 }], enemies: [
-    { species: 'beetle', x: 360, y: 240, elite: true }, { species: 'spitter', x: 100, y: 150 }, { species: 'spitter', x: 620, y: 150 }, { species: 'hopper', x: 120, y: 640 }, { species: 'hopper', x: 600, y: 640 }, { species: 'beetle', x: 360, y: 520 }, { species: 'spitter', x: 360, y: 100 }, { species: 'hopper', x: 180, y: 280 }, { species: 'hopper', x: 540, y: 280 }, { species: 'spitter', x: 100, y: 300 }, { species: 'spitter', x: 620, y: 300 }, { species: 'spitter', x: 360, y: 680 },
-    { species: 'spitter', x: 100, y: 780 }, { species: 'spitter', x: 620, y: 780 }, { species: 'spitter', x: 360, y: 360 }, { species: 'hopper', x: 300, y: 700 }, { species: 'hopper', x: 420, y: 700 }, { species: 'beetle', x: 360, y: 100 },
+    { species: 'beetle', x: 360, y: 240, elite: true }, { species: 'spitter', x: 100, y: 150, variant: 'sniper' }, { species: 'spitter', x: 620, y: 150, variant: 'sniper' }, { species: 'hopper', x: 120, y: 640 }, { species: 'hopper', x: 600, y: 640 }, { species: 'beetle', x: 360, y: 520, variant: 'splitter' }, { species: 'spitter', x: 360, y: 100 }, { species: 'hopper', x: 180, y: 280 }, { species: 'hopper', x: 540, y: 280 }, { species: 'spitter', x: 100, y: 300 }, { species: 'spitter', x: 620, y: 300 }, { species: 'spitter', x: 360, y: 680 },
+    { species: 'spitter', x: 100, y: 780 }, { species: 'spitter', x: 620, y: 780 }, { species: 'spitter', x: 360, y: 360 }, { species: 'hopper', x: 300, y: 700 }, { species: 'hopper', x: 420, y: 700 }, { species: 'beetle', x: 360, y: 100, variant: 'splitter' },
   ] },
 ];
 export type DailyRoomMetadata = { id: string; name: string; description: string; encounterIndex: 2 };

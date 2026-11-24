@@ -165,6 +165,11 @@ function dispatch(events: GameEvent[]) {
       healthNoticeKind = "heal";
       healthNoticeUntil = performance.now() + 1400;
     }
+    if (event.type === "impact" && event.kind === "heart") {
+      healthNotice = "+1 HEART recovered!";
+      healthNoticeKind = "heal";
+      healthNoticeUntil = performance.now() + 1600;
+    }
     if (event.type === "encounterClear") {
       healthNotice = `Chamber cleared · ${healthAmount(run.core)}/${run.maxCore} life.`;
       healthNoticeKind = "heal";
@@ -356,7 +361,7 @@ function updateHud() {
     element("life-group").classList.toggle("low-life", lowLife);
     element("life-warning").hidden = !lowLife;
     element("hud").dataset.lowLife = String(lowLife);
-    element("host-name").textContent = `${run.mutations.length} / 6`;
+    element("host-name").textContent = `${run.mutations.length}`;
     element("health-note").title = healthExplanation();
     element("chamber-value").textContent = `${String(
       run.encounterIndex + 1
@@ -697,7 +702,7 @@ function renderReward() {
         : ""
     }
     ${
-      run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 6
+      run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 10
         ? `<button id="cursed-pact" class="text-button" type="button">Cursed Pact (-1 heart): also claim ${MUTATIONS[run.rewardOffers[0]!].name}</button>`
         : ""
     }
@@ -710,7 +715,7 @@ function renderReward() {
   paintRewardSpecimens();
   run.rewardOffers.forEach((id, index) =>
     bind(`reward-${index}`, () => {
-      if (run.mutations.length >= 6) {
+      if (run.mutations.length >= 10) {
         replacement = id;
         updateUi(true);
         return;
@@ -719,7 +724,7 @@ function renderReward() {
       enterNextChamber();
     })
   );
-  if (run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 6) {
+  if (run.encounterIndex === 2 && run.core > 1 && run.rewardOffers.length > 0 && run.mutations.length < 10) {
     bind("cursed-pact", () => {
       const offer = run.rewardOffers[0];
       if (!offer) return;

@@ -411,6 +411,19 @@ function updateHud() {
   element("ability-button").title = touchControls
     ? "Tap to dash through enemy bullets"
     : "Dash through bullets · Click or Space";
+  const liveScore = computeRunScore({
+    outcome: run.phase === "escaped" ? "escaped" : "dead",
+    completedEncounters: run.completedEncounters,
+    activeTimeMs: run.activeTimeMs,
+    counters: run.counters,
+  });
+  const dateLabel = store.bootstrap.challenge.date.slice(5).replace("-", "/");
+  setText(
+    "challenge-label",
+    run.phase === "ready" && run.encounterIndex === 0
+      ? `DAILY ESCAPE · ${dateLabel}`
+      : `SCORE ${liveScore.toLocaleString()} · ${dateLabel}`
+  );
   element("sound-button").dataset.muted = String(audio.muted);
   element("sound-button").title = audio.muted ? "Unmute sound" : "Mute sound";
   element("sound-button").setAttribute(
@@ -535,7 +548,7 @@ function renderReady() {
   const chamber = getEncounter(run.challenge, run.encounterIndex);
   showScreen(`<span class="eyebrow">${
     first
-      ? "A PARASITE ESCAPE"
+      ? "A DAILY BULLET-HELL ESCAPE"
       : run.encounterIndex === getDailyRoom(run.challenge).encounterIndex
       ? "TODAY’S CHAMBER · 3 OF 6"
       : `CHAMBER ${run.encounterIndex + 1} OF 6`
@@ -1032,7 +1045,7 @@ function connectGame() {
     return;
   }
   overlay.innerHTML =
-    '<div class="loading"><span class="little-worm"></span><p>Finding a body…</p><p class="loading-recovery">Taking a while? <a href="">Reload this game</a>.</p></div>';
+    '<div class="loading"><span class="little-worm"></span><p>Loading chamber…</p><p class="loading-recovery">Taking a while? <a href="">Reload this game</a>.</p></div>';
   overlay.classList.remove("hidden");
   element("control-tip").innerHTML = touchControls
     ? "Auto-fires at nearest foe.<br>Tap Dash to dodge bullets."

@@ -41,7 +41,7 @@ async function createDailyPost(): Promise<{ id: string; url: string }> {
   try {
     const ready = await redis.get(key);
     if (ready) return JSON.parse(ready) as { id: string; url: string };
-    const title = `MOLT · ${challenge.date} · Borrow a body. Find your way out.`;
+    const title = `MOLT · ${challenge.date} · Dodge the swarm. Stack upgrades.`;
     const pending = await redis.get(pendingKey);
     let post: { id: string; url: string } | undefined;
     if (pending) {
@@ -70,7 +70,7 @@ async function createDailyPost(): Promise<{ id: string; url: string }> {
         entry: "default",
         postData: { challenge, creationId },
         textFallback: {
-          text: "Defeat enemies, inhabit their bodies, and combine mutations through six encounters. Everyone starts with the same daily challenge. Retries are free. Open this post in the Reddit app or on reddit.com to play.",
+          text: "Dodge enemy volleys, detonate spores, and stack upgrades through six chambers. Everyone gets the same daily challenge and leaderboard. Retries are free. Open this post in the Reddit app or on reddit.com to play.",
         },
       });
     }

@@ -163,6 +163,8 @@ export class BodyHopScene extends Phaser.Scene {
   private exitOpen: boolean | null = null;
   private exitOpeningMs = 0;
   private lastFrameTime: number | null = null;
+  private hitstopMs = 0;
+  private callouts: { text: Phaser.GameObjects.Text; life: number; max: number; vy: number }[] = [];
   constructor(private hooks: SceneHooks) {
     super("body-hop");
   }
@@ -362,7 +364,12 @@ export class BodyHopScene extends Phaser.Scene {
     this.lastFrameTime = time;
     const delta = Math.min(50, dt);
     this.elapsed += delta;
-    this.hooks.tick(dt);
+    if (this.hitstopMs > 0 && !this.hooks.reducedMotion()) {
+      this.hitstopMs = Math.max(0, this.hitstopMs - delta);
+    } else {
+      this.hooks.tick(dt);
+    }
+    this.updateCallouts(delta);
     const run = this.hooks.getRun();
     if (this.visualPhase !== run.phase) {
       this.visualPhase = run.phase;
@@ -655,6 +662,23 @@ export class BodyHopScene extends Phaser.Scene {
         });
       }
       if (event.type === "impact") {
+        if (event.kind === "spore") {
+          this.rings.push(
+            { x: event.x, y: event.y, radius: event.radius, life: 360, max: 360, color: 0xffb74d },
+            { x: event.x, y: event.y, radius: event.radius * 0.62, life: 240, max: 240, color: 0xff5a36 }
+          );
+          this.spawnCallout(event.x, event.y - 18, "BOOM!", "#ffd275");
+          if (!this.hooks.reducedMotion()) {
+            this.hitstopMs = Math.max(this.hitstopMs, 28);
+            this.cameras.main.shake(110, 0.004, true);
+          }
+          continue;
+        }
+        if (event.kind === "graze") {
+          this.rings.push({ x: event.x, y: event.y, radius: event.radius, life: 240, max: 240, color: 0x8ef0b0 });
+          this.spawnCallout(event.x, event.y - 26, "GRAZE!", "#9ff7c0");
+          continue;
+        }
         const solidHit = event.faction === "player" && event.hitCount > 0;
         const enemy = event.faction === "enemy";
         const echo = event.faction === "echo";
@@ -855,6 +879,33 @@ export class BodyHopScene extends Phaser.Scene {
       } else {
         pose.image.setTexture(pose.texture, pose.frame).clearTint();
       }
+    }
+  }
+  private spawnCallout(x: number, y: number, label: string, color: string) {
+    const text = this.add
+      .text(x, y, label, {
+        fontFamily: '"Courier New", monospace',
+        fontSize: "16px",
+        fontStyle: "bold",
+        color,
+        stroke: "#1c191a",
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(15);
+    this.callouts.push({ text, life: 640, max: 640, vy: -34 });
+  }
+  private updateCallouts(dt: number) {
+    for (let i = this.callouts.length - 1; i >= 0; i--) {
+      const c = this.callouts[i]!;
+      c.life -= dt;
+      if (c.life <= 0) {
+        c.text.destroy();
+        this.callouts.splice(i, 1);
+        continue;
+      }
+      c.text.y += (c.vy * dt) / 1000;
+      c.text.setAlpha(Math.min(1, (c.life / c.max) * 1.4));
     }
   }
   private screenSize(worldSize: number, minimumPixels: number): number {

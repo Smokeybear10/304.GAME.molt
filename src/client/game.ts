@@ -10,6 +10,8 @@ import {
   INK,
 } from "./art";
 import {
+  VIEW_WIDTH,
+  VIEW_HEIGHT,
   WORLD_WIDTH,
   WORLD_HEIGHT,
   EXIT_RADIUS,
@@ -911,8 +913,8 @@ export class BodyHopScene extends Phaser.Scene {
     const view = cam.worldView;
     if (!view || view.width <= 0 || view.height <= 0) return { x: viewX, y: viewY };
     return {
-      x: view.x + (viewX / WORLD_WIDTH) * view.width,
-      y: view.y + (viewY / WORLD_HEIGHT) * view.height,
+      x: view.x + (viewX / VIEW_WIDTH) * view.width,
+      y: view.y + (viewY / VIEW_HEIGHT) * view.height,
     };
   }
   private updateCamera(run: Run, dt: number) {
@@ -920,17 +922,15 @@ export class BodyHopScene extends Phaser.Scene {
     if (!cam) return;
     const active = run.phase === "playing" || run.phase === "cleared";
     const reduced = this.hooks.reducedMotion();
-    const targetZoom = active && !reduced ? 1.24 : 1;
     const player = run.actors.find((actor) => actor.id === run.playerId);
     const input = this.hooks.getInput();
     const aim = input?.aimDirection ?? { x: 0, y: 0 };
-    const targetX = active && player && !reduced ? player.x + aim.x * 36 : WORLD_WIDTH / 2;
-    const targetY = active && player && !reduced ? player.y + aim.y * 36 : WORLD_HEIGHT / 2;
-    const t = 1 - Math.exp(-dt / 140);
-    this.camFocus.zoom += (targetZoom - this.camFocus.zoom) * t;
+    const targetX = player ? player.x + (active && !reduced ? aim.x * 44 : 0) : WORLD_WIDTH / 2;
+    const targetY = player ? player.y + (active && !reduced ? aim.y * 44 : 0) : WORLD_HEIGHT / 2;
+    const t = 1 - Math.exp(-dt / 120);
     this.camFocus.x += (targetX - this.camFocus.x) * t;
     this.camFocus.y += (targetY - this.camFocus.y) * t;
-    cam.setZoom(this.camFocus.zoom);
+    cam.setZoom(1);
     cam.centerOn(this.camFocus.x, this.camFocus.y);
   }
   private spawnCallout(x: number, y: number, label: string, color: string) {
@@ -2153,8 +2153,8 @@ export function mountGame(hooks: SceneHooks) {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "world",
-    width: WORLD_WIDTH,
-    height: WORLD_HEIGHT,
+    width: VIEW_WIDTH,
+    height: VIEW_HEIGHT,
     backgroundColor: INK.paper,
     transparent: false,
     antialias: true,
@@ -2163,8 +2163,8 @@ export function mountGame(hooks: SceneHooks) {
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: WORLD_WIDTH,
-      height: WORLD_HEIGHT,
+      width: VIEW_WIDTH,
+      height: VIEW_HEIGHT,
     },
     render: { antialias: true, roundPixels: false },
     fps: { target: 60, smoothStep: false },

@@ -13,7 +13,7 @@ export type MutationId = z.infer<typeof MutationIdSchema>;
 export type Phase = 'ready' | 'playing' | 'cleared' | 'paused' | 'reward' | 'dead' | 'escaped';
 export type Vec2 = { x: number; y: number };
 export type Rect = Vec2 & { width: number; height: number };
-export const CorpseSchema = z.object({ id: z.number().int().positive().max(10000000), species: SpeciesSchema, x: z.number().finite().min(0).max(720), y: z.number().finite().min(0).max(960), radius: z.number().finite().positive().max(100), spent: z.boolean(), elite: z.boolean(), consumed: z.literal(true).optional() }).strict().refine(value => !value.consumed || value.spent, { message: 'A consumed body must be spent.' });
+export const CorpseSchema = z.object({ id: z.number().int().positive().max(10000000), species: SpeciesSchema, x: z.number().finite().min(0).max(1080), y: z.number().finite().min(0).max(1440), radius: z.number().finite().positive().max(100), spent: z.boolean(), elite: z.boolean(), consumed: z.literal(true).optional() }).strict().refine(value => !value.consumed || value.spent, { message: 'A consumed body must be spent.' });
 export const ChallengeSchema = z.object({ id: z.string().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const time = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
@@ -67,7 +67,7 @@ export const CheckpointSchema = z.object({
   encounterIndex: z.number().int().min(0).max(5), boundary: z.enum(['encounter-start', 'cleared', 'reward']),
   core: z.number().int().min(1).max(3), maxCore: z.literal(3),
   hopCooldownMs: z.number().finite().min(0).max(350).default(0),
-  host: z.object({ species: SpeciesSchema, shell: z.literal(0), specialCooldownMs: z.number().finite().min(0).max(10000), basicCooldownMs: z.number().finite().min(0).max(10000), lastSpecial: SpecialRecordSchema.nullable().default(null), position: z.object({ x: z.number().finite().min(0).max(720), y: z.number().finite().min(0).max(960) }).strict().nullable().default(null) }).strict(),
+  host: z.object({ species: SpeciesSchema, shell: z.literal(0), specialCooldownMs: z.number().finite().min(0).max(10000), basicCooldownMs: z.number().finite().min(0).max(10000), lastSpecial: SpecialRecordSchema.nullable().default(null), position: z.object({ x: z.number().finite().min(0).max(1080), y: z.number().finite().min(0).max(1440) }).strict().nullable().default(null) }).strict(),
   clearedCorpses: z.array(CorpseSchema).max(128).default([]),
   mutations: SlotsSchema, rewardOffers: z.array(MutationIdSchema).max(3).refine(values => new Set(values).size === values.length),
   completedEncounters: z.number().int().min(0).max(6), activeTimeMs: z.number().finite().min(0).max(3600000),

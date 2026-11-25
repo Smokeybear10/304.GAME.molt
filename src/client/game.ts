@@ -166,11 +166,21 @@ export class BodyHopScene extends Phaser.Scene {
   private hitstopMs = 0;
   private callouts: { text: Phaser.GameObjects.Text; life: number; max: number; vy: number }[] = [];
   private arcs: { fromX: number; fromY: number; toX: number; toY: number; life: number; max: number }[] = [];
+  private camFocus = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, zoom: 1 };
+  private motes = Array.from({ length: 24 }, (_, i) => ({
+    x: ((i * 197 + 63) % (WORLD_WIDTH - 80)) + 40,
+    y: ((i * 269 + 91) % (WORLD_HEIGHT - 100)) + 50,
+    vx: ((i % 5) - 2) * 5.5,
+    vy: -8 - (i % 4) * 4.5,
+    size: 1.4 + (i % 3) * 0.9,
+    phase: i * 0.9,
+  }));
   constructor(private hooks: SceneHooks) {
     super("body-hop");
   }
   create() {
     this.canvasRendering = this.game.renderer.type === Phaser.CANVAS;
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     const speciesList: Species[] = ["spitter", "beetle", "hopper"];
     const tile = 96,
       columns = 20;
@@ -378,6 +388,7 @@ export class BodyHopScene extends Phaser.Scene {
       this.phaseStartedAt = this.elapsed;
     }
     this.syncEncounter(run);
+    this.updateCamera(run, delta);
     this.draw(run, delta);
     const settled =
       run.phase === "ready" ||
@@ -894,6 +905,34 @@ export class BodyHopScene extends Phaser.Scene {
       }
     }
   }
+  screenToWorld(viewX: number, viewY: number): Vec2 {
+    const cam = this.cameras?.main;
+    if (!cam) return { x: viewX, y: viewY };
+    const view = cam.worldView;
+    if (!view || view.width <= 0 || view.height <= 0) return { x: viewX, y: viewY };
+    return {
+      x: view.x + (viewX / WORLD_WIDTH) * view.width,
+      y: view.y + (viewY / WORLD_HEIGHT) * view.height,
+    };
+  }
+  private updateCamera(run: Run, dt: number) {
+    const cam = this.cameras?.main;
+    if (!cam) return;
+    const active = run.phase === "playing" || run.phase === "cleared";
+    const reduced = this.hooks.reducedMotion();
+    const targetZoom = active && !reduced ? 1.24 : 1;
+    const player = run.actors.find((actor) => actor.id === run.playerId);
+    const input = this.hooks.getInput();
+    const aim = input?.aimDirection ?? { x: 0, y: 0 };
+    const targetX = active && player && !reduced ? player.x + aim.x * 36 : WORLD_WIDTH / 2;
+    const targetY = active && player && !reduced ? player.y + aim.y * 36 : WORLD_HEIGHT / 2;
+    const t = 1 - Math.exp(-dt / 140);
+    this.camFocus.zoom += (targetZoom - this.camFocus.zoom) * t;
+    this.camFocus.x += (targetX - this.camFocus.x) * t;
+    this.camFocus.y += (targetY - this.camFocus.y) * t;
+    cam.setZoom(this.camFocus.zoom);
+    cam.centerOn(this.camFocus.x, this.camFocus.y);
+  }
   private spawnCallout(x: number, y: number, label: string, color: string) {
     const text = this.add
       .text(x, y, label, {
@@ -1092,6 +1131,20 @@ export class BodyHopScene extends Phaser.Scene {
       marks.lineStyle(1.8, 0xffffff, alpha);
       marks.lineBetween(arc.fromX, arc.fromY, midX, midY);
       marks.lineBetween(midX, midY, arc.toX, arc.toY);
+    }
+    const cam = this.cameras?.main;
+    const parallaxX = cam ? (cam.scrollX + cam.width / 2 - WORLD_WIDTH / 2) * 0.16 : 0;
+    const parallaxY = cam ? (cam.scrollY + cam.height / 2 - WORLD_HEIGHT / 2) * 0.16 : 0;
+    const moteColor = run.encounterIndex === 4 ? 0xff9a4d : run.encounterIndex === 5 ? 0xff6b82 : 0xe9e2c8;
+    for (const mote of this.motes) {
+      if (!this.hooks.reducedMotion()) {
+        mote.x = (mote.x + (mote.vx * dt) / 1000 + WORLD_WIDTH) % WORLD_WIDTH;
+        mote.y = (mote.y + (mote.vy * dt) / 1000 + WORLD_HEIGHT) % WORLD_HEIGHT;
+      }
+      const shimmer = 0.22 + 0.18 * Math.sin(this.elapsed * 0.003 + mote.phase);
+      const mx = mote.x - parallaxX;
+      const my = mote.y - parallaxY;
+      marks.fillStyle(moteColor, shimmer).fillCircle(mx, my, mote.size);
     }
     const input = this.hooks.getInput(),
       player = actors.find((actor) => actor.id === run.playerId)!;

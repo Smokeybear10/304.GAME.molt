@@ -370,6 +370,46 @@ export function createFeastFloor(
   ctx.restore();
   chamberWear(ctx, chamber);
 
+  // Subtle architectural floor details & overhead atmospheric lighting per chamber
+  ctx.save();
+  ctx.clip(well);
+  const cx = WORLD_WIDTH / 2;
+  const cy = WORLD_HEIGHT / 2;
+  ctx.strokeStyle = chamber === 4 ? "rgba(255, 138, 76, 0.14)" : chamber === 5 ? "rgba(224, 79, 107, 0.15)" : "rgba(225, 220, 198, 0.085)";
+  ctx.lineWidth = 1.5;
+  for (let gx = 96; gx < WORLD_WIDTH - 64; gx += 76) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 80);
+    ctx.lineTo(gx, WORLD_HEIGHT - 80);
+    ctx.stroke();
+  }
+  for (let gy = 120; gy < WORLD_HEIGHT - 80; gy += 76) {
+    ctx.beginPath();
+    ctx.moveTo(64, gy);
+    ctx.lineTo(WORLD_WIDTH - 64, gy);
+    ctx.stroke();
+  }
+  if (chamber === 0 || chamber === 5) {
+    for (const r of [120, 215, 310]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy - 20, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else if (chamber === 4) {
+    const glow = ctx.createRadialGradient(cx, cy, 40, cx, cy, 380);
+    glow.addColorStop(0, "rgba(255, 118, 56, 0.16)");
+    glow.addColorStop(1, "rgba(255, 80, 30, 0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  }
+  const spotlight = ctx.createRadialGradient(cx, cy - 30, 80, cx, cy, 560);
+  spotlight.addColorStop(0, "rgba(255, 248, 224, 0.11)");
+  spotlight.addColorStop(0.58, "rgba(20, 18, 18, 0)");
+  spotlight.addColorStop(1, "rgba(12, 11, 13, 0.42)");
+  ctx.fillStyle = spotlight;
+  ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  ctx.restore();
+
   let seed = 7621 + chamber * 53;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -489,6 +529,12 @@ export function createFeastFloor(
     line(ctx, fracture!, "#847c64", 1.2);
   }
   for (const obstacle of obstacles) {
+    ctx.save();
+    ctx.fillStyle = "rgba(16, 14, 15, 0.34)";
+    ctx.beginPath();
+    ctx.roundRect(obstacle.x + 10, obstacle.y + 14, obstacle.width, obstacle.height, 8);
+    ctx.fill();
+    ctx.restore();
     if (chamber === 3) ribs(ctx, obstacle);
     else bread(ctx, obstacle, chamber === 4);
   }

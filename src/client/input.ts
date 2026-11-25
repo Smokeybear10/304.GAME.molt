@@ -40,7 +40,8 @@ export class GameInput {
   constructor(
     private canvas: HTMLCanvasElement,
     private getRun: () => Run,
-    private onPause: () => void
+    private onPause: () => void,
+    private mapViewToWorld?: (viewX: number, viewY: number) => Vec2
   ) {
     const options = { signal: this.controller.signal };
     const updateBounds = () => {
@@ -145,10 +146,9 @@ export class GameInput {
   }
 
   private toWorld(x: number, y: number): Vec2 {
-    return {
-      x: ((x - this.bounds.left) / this.bounds.width) * WORLD_WIDTH,
-      y: ((y - this.bounds.top) / this.bounds.height) * WORLD_HEIGHT,
-    };
+    const viewX = ((x - this.bounds.left) / this.bounds.width) * WORLD_WIDTH;
+    const viewY = ((y - this.bounds.top) / this.bounds.height) * WORLD_HEIGHT;
+    return this.mapViewToWorld ? this.mapViewToWorld(viewX, viewY) : { x: viewX, y: viewY };
   }
 
   private queueDash() {

@@ -1096,7 +1096,8 @@ function connectGame() {
             updateUi(true);
           } else if (run.phase === "paused") begin();
           else pauseGame();
-        }
+        },
+        (viewX, viewY) => renderer?.scene.screenToWorld(viewX, viewY) ?? { x: viewX, y: viewY }
       );
       updateUi(true);
     },

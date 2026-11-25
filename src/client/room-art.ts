@@ -264,8 +264,10 @@ export function createFeastFloor(
   const palette = DISHES[chamber]!;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  ctx.save();
+  ctx.scale(WORLD_WIDTH / 720, WORLD_HEIGHT / 960);
   ctx.fillStyle = "#282b29";
-  ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  ctx.fillRect(0, 0, 720, 960);
 
   const dish = new Path2D(
     "M 38 7 L 680 7 Q 711 9 713 38 L 713 922 Q 712 950 679 953 L 39 953 Q 8 952 7 923 L 7 39 Q 8 9 38 7 Z"
@@ -301,7 +303,7 @@ export function createFeastFloor(
   ctx.clip(well);
   ctx.save();
   if (chamber % 2) {
-    ctx.translate(WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.translate(720, 960);
     ctx.rotate(Math.PI);
   }
   // Wiped glaze and grease are flat marks, never silhouettes of solid cover.
@@ -373,41 +375,41 @@ export function createFeastFloor(
   // Subtle architectural floor details & overhead atmospheric lighting per chamber
   ctx.save();
   ctx.clip(well);
-  const cx = WORLD_WIDTH / 2;
-  const cy = WORLD_HEIGHT / 2;
+  const cx = 360;
+  const cy = 480;
   ctx.strokeStyle = chamber === 4 ? "rgba(255, 138, 76, 0.14)" : chamber === 5 ? "rgba(224, 79, 107, 0.15)" : "rgba(225, 220, 198, 0.085)";
-  ctx.lineWidth = 1.5;
-  for (let gx = 96; gx < WORLD_WIDTH - 64; gx += 76) {
+  ctx.lineWidth = 1.2;
+  for (let gx = 96; gx < 720 - 64; gx += 64) {
     ctx.beginPath();
-    ctx.moveTo(gx, 80);
-    ctx.lineTo(gx, WORLD_HEIGHT - 80);
+    ctx.moveTo(gx, 60);
+    ctx.lineTo(gx, 900);
     ctx.stroke();
   }
-  for (let gy = 120; gy < WORLD_HEIGHT - 80; gy += 76) {
+  for (let gy = 100; gy < 960 - 64; gy += 64) {
     ctx.beginPath();
-    ctx.moveTo(64, gy);
-    ctx.lineTo(WORLD_WIDTH - 64, gy);
+    ctx.moveTo(56, gy);
+    ctx.lineTo(664, gy);
     ctx.stroke();
   }
   if (chamber === 0 || chamber === 5) {
-    for (const r of [120, 215, 310]) {
+    for (const r of [110, 195, 280]) {
       ctx.beginPath();
       ctx.arc(cx, cy - 20, r, 0, Math.PI * 2);
       ctx.stroke();
     }
   } else if (chamber === 4) {
-    const glow = ctx.createRadialGradient(cx, cy, 40, cx, cy, 380);
+    const glow = ctx.createRadialGradient(cx, cy, 40, cx, cy, 360);
     glow.addColorStop(0, "rgba(255, 118, 56, 0.16)");
     glow.addColorStop(1, "rgba(255, 80, 30, 0)");
     ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.fillRect(0, 0, 720, 960);
   }
-  const spotlight = ctx.createRadialGradient(cx, cy - 30, 80, cx, cy, 560);
+  const spotlight = ctx.createRadialGradient(cx, cy - 30, 80, cx, cy, 520);
   spotlight.addColorStop(0, "rgba(255, 248, 224, 0.11)");
   spotlight.addColorStop(0.58, "rgba(20, 18, 18, 0)");
   spotlight.addColorStop(1, "rgba(12, 11, 13, 0.42)");
   ctx.fillStyle = spotlight;
-  ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  ctx.fillRect(0, 0, 720, 960);
   ctx.restore();
 
   let seed = 7621 + chamber * 53;
@@ -436,7 +438,7 @@ export function createFeastFloor(
 
   // The cropped table setting stays within the physical edge of the dish.
   const edgeOnly = new Path2D();
-  edgeOnly.rect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  edgeOnly.rect(0, 0, 720, 960);
   edgeOnly.addPath(well);
   ctx.save();
   ctx.clip(edgeOnly, "evenodd");
@@ -528,6 +530,7 @@ export function createFeastFloor(
     fill(ctx, outline!, "#c9bea0", "#39453c", 1.5);
     line(ctx, fracture!, "#847c64", 1.2);
   }
+  ctx.restore();
   for (const obstacle of obstacles) {
     ctx.save();
     ctx.fillStyle = "rgba(16, 14, 15, 0.34)";

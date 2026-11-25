@@ -11,8 +11,8 @@ import {
   PLAYER_SPIT_WINDUP_MS,
   SPECIES,
   TICK_MS,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
+  VIEW_HEIGHT,
+  VIEW_WIDTH,
 } from "../shared/content";
 import type { Actor, Corpse, InputFrame, Run, Vec2 } from "../shared/types";
 
@@ -146,8 +146,8 @@ export class GameInput {
   }
 
   private toWorld(x: number, y: number): Vec2 {
-    const viewX = ((x - this.bounds.left) / this.bounds.width) * WORLD_WIDTH;
-    const viewY = ((y - this.bounds.top) / this.bounds.height) * WORLD_HEIGHT;
+    const viewX = ((x - this.bounds.left) / this.bounds.width) * VIEW_WIDTH;
+    const viewY = ((y - this.bounds.top) / this.bounds.height) * VIEW_HEIGHT;
     return this.mapViewToWorld ? this.mapViewToWorld(viewX, viewY) : { x: viewX, y: viewY };
   }
 

@@ -239,8 +239,8 @@ function prepareEncounter(run: Run, host: Checkpoint['host']): void {
   player.lastSpecial = host.lastSpecial ? { ...host.lastSpecial } : null;
   run.playerId = player.id;
   const sporeSlots = run.encounterIndex % 2 === 0
-    ? [{ x: 205, y: 490 }, { x: 515, y: 360 }]
-    : [{ x: 515, y: 490 }, { x: 205, y: 360 }];
+    ? [{ x: 260, y: 740 }, { x: 820, y: 560 }, { x: 540, y: 380 }]
+    : [{ x: 820, y: 740 }, { x: 260, y: 560 }, { x: 540, y: 380 }];
   for (const spot of sporeSlots) {
     const pos = fitPosition(run, spot.x, spot.y, 26);
     if (distance(pos, encounter.start) > 150) {
